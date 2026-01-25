@@ -1,0 +1,73 @@
+<?php
+namespace App\Controllers;
+
+use App\Core\Auth;
+use App\Core\Database;
+use App\Core\Request;
+use App\Core\Response;
+use App\Core\Validator;
+
+class UserController
+{
+    public static function me(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
+        $stmt->execute([$user['id']]);
+        $fresh = $stmt->fetch();
+        $photosStmt = $pdo->prepare('SELECT id, file_name, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? ORDER BY created_at DESC');
+        $photosStmt->execute([$user['id']]);
+        $photos = $photosStmt->fetchAll();
+        Response::json(['ok' => true, 'data' => ['user' => $fresh, 'photos' => $photos]]);
+    }
+
+    public static function update(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        $fullName = trim($data['full_name'] ?? $user['full_name']);
+        $bio = trim($data['bio'] ?? ($user['bio'] ?? ''));
+        $phone = trim($data['phone'] ?? ($user['phone'] ?? ''));
+        $email = strtolower(trim($data['email'] ?? $user['email']));
+
+        if (!Validator::fullName($fullName)) {
+            Response::json(['ok' => false, 'error' => 'نام کامل معتبر نیست.'], 422);
+        }
+        if (!Validator::bio($bio)) {
+            Response::json(['ok' => false, 'error' => 'بیوگرافی بیش از حد طولانی است.'], 422);
+        }
+        if (!Validator::phone($phone)) {
+            Response::json(['ok' => false, 'error' => 'شماره تلفن معتبر نیست.'], 422);
+        }
+        if (!Validator::gmail($email)) {
+            Response::json(['ok' => false, 'error' => 'فقط ایمیل‌های Gmail مجاز هستند.'], 422);
+        }
+
+        $pdo = Database::pdo();
+        $check = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE email = ? AND id != ? LIMIT 1');
+        $check->execute([$email, $user['id']]);
+        if ($check->fetch()) {
+            Response::json(['ok' => false, 'error' => 'این ایمیل قبلاً استفاده شده است.'], 409);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
+        $stmt->execute([$fullName, $bio, $phone, $email, $now, $user['id']]);
+        Response::json(['ok' => true]);
+    }
+
+    public static function search(array $config): void
+    {
+        Auth::requireUser($config);
+        $query = strtolower(trim(Request::param('query', '')));
+        if ($query === '' || strlen($query) < 2) {
+            Response::json(['ok' => true, 'data' => []]);
+        }
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT id, full_name, username, active_photo_id FROM ' . $config['db']['prefix'] . 'users WHERE username LIKE ? ORDER BY username ASC LIMIT 20');
+        $stmt->execute([$query . '%']);
+        $users = $stmt->fetchAll();
+        Response::json(['ok' => true, 'data' => $users]);
+    }
+}
