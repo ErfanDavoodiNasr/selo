@@ -151,6 +151,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'uploads' => [
                     'dir' => $basePath . '/storage/uploads',
                     'max_size' => 2 * 1024 * 1024,
+                    'media_dir' => $basePath . '/storage/uploads/media',
+                    'media_max_size' => 20 * 1024 * 1024,
+                    'photo_max_size' => 5 * 1024 * 1024,
+                    'video_max_size' => 25 * 1024 * 1024,
+                    'voice_max_size' => 10 * 1024 * 1024,
+                    'file_max_size' => 20 * 1024 * 1024,
                 ],
             ];
 
@@ -179,6 +185,7 @@ $writable = [
     $basePath . '/config' => is_writable($basePath . '/config') || !file_exists($basePath . '/config'),
     $basePath . '/storage' => is_writable($basePath . '/storage'),
     $basePath . '/storage/uploads' => is_writable($basePath . '/storage/uploads'),
+    $basePath . '/storage/uploads/media' => is_writable($basePath . '/storage/uploads') || !file_exists($basePath . '/storage/uploads/media'),
 ];
 
 $stepView = $step;

@@ -91,6 +91,18 @@ if (strpos($path, '/api/') === 0) {
                     </div>
                 </div>
                 <div id="messages" class="messages"></div>
+                <div id="attachment-preview" class="attachment-preview hidden"></div>
+                <div id="voice-recorder" class="voice-recorder hidden">
+                    <div class="voice-info">
+                        <span class="voice-status">در حال ضبط</span>
+                        <span id="voice-timer" class="voice-timer">00:00</span>
+                    </div>
+                    <div class="voice-actions">
+                        <button id="voice-cancel" class="icon-btn" title="لغو">✖</button>
+                        <button id="voice-stop" class="icon-btn" title="توقف">■</button>
+                        <button id="voice-send" class="send-btn small hidden">ارسال</button>
+                    </div>
+                </div>
                 <div id="reply-bar" class="reply-bar hidden">
                     <div class="reply-content">
                         <span>پاسخ به</span>
@@ -99,14 +111,29 @@ if (strpos($path, '/api/') === 0) {
                     <button id="reply-cancel" class="icon-btn">×</button>
                 </div>
                 <div class="composer">
+                    <button id="attach-btn" class="icon-btn" title="پیوست">📎</button>
+                    <div id="attach-menu" class="attach-menu hidden">
+                        <button type="button" data-type="media">عکس / ویدیو</button>
+                        <button type="button" data-type="file">فایل</button>
+                    </div>
                     <button id="emoji-btn" class="icon-btn">😊</button>
                     <div class="composer-input">
                         <textarea id="message-input" rows="1" placeholder="پیام بنویسید..."></textarea>
                         <div id="emoji-picker" class="emoji-picker hidden"></div>
                     </div>
+                    <button id="voice-btn" class="icon-btn" title="پیام صوتی">🎤</button>
                     <button id="send-btn" class="send-btn">ارسال</button>
                 </div>
+                <input id="media-input" type="file" accept="image/*,video/*" class="hidden">
+                <input id="file-input" type="file" class="hidden">
             </section>
+        </div>
+    </div>
+
+    <div id="lightbox" class="lightbox hidden">
+        <div class="lightbox-inner">
+            <img id="lightbox-img" alt="preview">
+            <button id="lightbox-close" class="icon-btn">✖</button>
         </div>
     </div>
 

@@ -30,6 +30,25 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}user_profile_photos` (
   CONSTRAINT `fk_photos_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}media_files` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `type` ENUM('voice', 'file', 'photo', 'video') NOT NULL,
+  `file_name` VARCHAR(255) NOT NULL,
+  `original_name` VARCHAR(255) NOT NULL,
+  `mime_type` VARCHAR(100) NOT NULL,
+  `size_bytes` INT UNSIGNED NOT NULL,
+  `duration` INT UNSIGNED NULL,
+  `width` INT UNSIGNED NULL,
+  `height` INT UNSIGNED NULL,
+  `thumbnail_name` VARCHAR(255) NULL,
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_type` (`type`),
+  CONSTRAINT `fk_media_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}conversations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_one_id` INT UNSIGNED NOT NULL,
@@ -51,7 +70,9 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   `conversation_id` BIGINT UNSIGNED NOT NULL,
   `sender_id` INT UNSIGNED NOT NULL,
   `recipient_id` INT UNSIGNED NOT NULL,
-  `body` TEXT NOT NULL,
+  `type` ENUM('text', 'voice', 'file', 'photo', 'video') NOT NULL DEFAULT 'text',
+  `body` TEXT NULL,
+  `media_id` BIGINT UNSIGNED NULL,
   `reply_to_message_id` BIGINT UNSIGNED NULL,
   `is_deleted_for_all` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL,
@@ -60,8 +81,10 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   KEY `idx_sender` (`sender_id`),
   KEY `idx_recipient` (`recipient_id`),
   KEY `idx_reply_to` (`reply_to_message_id`),
+  KEY `idx_media_id` (`media_id`),
   KEY `idx_created_at` (`created_at`),
-  CONSTRAINT `fk_msg_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE
+  CONSTRAINT `fk_msg_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_msg_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `{{prefix}}message_deletions` (

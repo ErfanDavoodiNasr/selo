@@ -4,6 +4,8 @@ use App\Controllers\AuthController;
 use App\Controllers\UserController;
 use App\Controllers\ConversationController;
 use App\Controllers\MessageController;
+use App\Controllers\UploadController;
+use App\Controllers\MediaController;
 use App\Controllers\ProfileController;
 
 $router = new Router();
@@ -34,6 +36,12 @@ $router->add('GET', '#^/api/messages$#', function () use ($config) {
 });
 $router->add('POST', '#^/api/messages$#', function () use ($config) {
     MessageController::send($config);
+});
+$router->add('POST', '#^/api/uploads$#', function () use ($config) {
+    UploadController::upload($config);
+});
+$router->add('GET', '#^/api/media/(\\d+)$#', function ($matches) use ($config) {
+    MediaController::serve($config, (int)$matches[1]);
 });
 $router->add('POST', '#^/api/messages/delete-for-me$#', function () use ($config) {
     MessageController::deleteForMe($config);
