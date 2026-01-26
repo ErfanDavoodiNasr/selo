@@ -3,8 +3,10 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\RateLimiter;
 use App\Core\Validator;
 
 class MessageController
@@ -96,7 +98,7 @@ class MessageController
 
             unset($row['media_type'], $row['media_file_name'], $row['media_original_name'], $row['media_mime_type'], $row['media_size_bytes'], $row['media_duration'], $row['media_width'], $row['media_height'], $row['media_thumbnail_name']);
         }
-
+        $messages = MessageReactionService::hydrate($config, $messages, (int)$user['id']);
         Response::json(['ok' => true, 'data' => $messages]);
     }
 
@@ -233,6 +235,111 @@ class MessageController
         }
         $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'messages SET is_deleted_for_all = 1 WHERE id = ?');
         $update->execute([$messageId]);
+        $pdo->prepare('DELETE FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ?')->execute([$messageId]);
         Response::json(['ok' => true]);
+    }
+
+    public static function react(array $config, int $messageId): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        $emoji = trim((string)($data['emoji'] ?? ''));
+        if ($messageId <= 0) {
+            Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
+        }
+        if (!MessageReactionService::isAllowed($emoji)) {
+            Response::json(['ok' => false, 'error' => 'ایموجی نامعتبر است.'], 422);
+        }
+
+        $pdo = Database::pdo();
+        $message = self::requireMessageAccess($pdo, $config, $messageId, (int)$user['id']);
+        if (!$message) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+
+        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $identifier = 'reaction:' . $user['id'];
+        if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, 20, 1, 1)) {
+            Response::json(['ok' => false, 'error' => 'تعداد درخواست‌ها زیاد است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitCustom($ip, $identifier, $config, 20, 1, 1);
+
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_reactions (message_id, user_id, reaction_emoji, created_at, updated_at)\n            VALUES (?, ?, ?, ?, ?)\n            ON DUPLICATE KEY UPDATE reaction_emoji = VALUES(reaction_emoji), updated_at = VALUES(updated_at)');
+        $stmt->execute([$messageId, $user['id'], $emoji, $now, $now]);
+
+        Response::json(['ok' => true]);
+    }
+
+    public static function removeReaction(array $config, int $messageId): void
+    {
+        $user = Auth::requireUser($config);
+        if ($messageId <= 0) {
+            Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
+        }
+        $pdo = Database::pdo();
+        $message = self::requireMessageAccess($pdo, $config, $messageId, (int)$user['id']);
+        if (!$message) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+        $stmt = $pdo->prepare('DELETE FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ? AND user_id = ?');
+        $stmt->execute([$messageId, $user['id']]);
+        Response::json(['ok' => true]);
+    }
+
+    public static function reactions(array $config, int $messageId): void
+    {
+        $user = Auth::requireUser($config);
+        if ($messageId <= 0) {
+            Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
+        }
+        $pdo = Database::pdo();
+        $message = self::requireMessageAccess($pdo, $config, $messageId, (int)$user['id']);
+        if (!$message) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+        $emoji = Request::param('emoji', null);
+        $limit = (int)Request::param('limit', 20);
+        $result = MessageReactionService::summary($config, $messageId, (int)$user['id'], $emoji, $limit);
+        if (!$result['ok']) {
+            Response::json(['ok' => false, 'error' => $result['error']], 422);
+        }
+        Response::json($result);
+    }
+
+    private static function requireMessageAccess($pdo, array $config, int $messageId, int $userId): ?array
+    {
+        $stmt = $pdo->prepare('SELECT m.id, m.conversation_id, m.group_id, m.is_deleted_for_all,
+                c.user_one_id, c.user_two_id,
+                gm.user_id AS member_id
+            FROM ' . $config['db']['prefix'] . 'messages m
+            LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+            LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+            WHERE m.id = ? LIMIT 1');
+        $stmt->execute([$userId, 'active', $messageId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            return null;
+        }
+        if ((int)$row['is_deleted_for_all'] === 1) {
+            return null;
+        }
+        $del = $pdo->prepare('SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions WHERE message_id = ? AND user_id = ? LIMIT 1');
+        $del->execute([$messageId, $userId]);
+        if ($del->fetch()) {
+            return null;
+        }
+        if ($row['conversation_id'] !== null) {
+            if ((int)$row['user_one_id'] !== $userId && (int)$row['user_two_id'] !== $userId) {
+                return null;
+            }
+        } elseif ($row['group_id'] !== null) {
+            if (empty($row['member_id'])) {
+                return null;
+            }
+        } else {
+            return null;
+        }
+        return $row;
     }
 }

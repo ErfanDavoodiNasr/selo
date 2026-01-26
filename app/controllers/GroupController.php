@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Validator;
@@ -418,6 +419,7 @@ class GroupController
             unset($row['media_type'], $row['media_file_name'], $row['media_original_name'], $row['media_mime_type'], $row['media_size_bytes'], $row['media_duration'], $row['media_width'], $row['media_height'], $row['media_thumbnail_name']);
         }
 
+        $messages = MessageReactionService::hydrate($config, $messages, (int)$user['id']);
         Response::json(['ok' => true, 'data' => $messages]);
     }
 

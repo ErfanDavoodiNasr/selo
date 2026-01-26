@@ -129,6 +129,21 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   CONSTRAINT `fk_msg_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}message_reactions` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `message_id` BIGINT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `reaction_emoji` VARCHAR(16) NOT NULL,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_message_user` (`message_id`, `user_id`),
+  KEY `idx_message_id` (`message_id`),
+  KEY `idx_message_emoji` (`message_id`, `reaction_emoji`),
+  CONSTRAINT `fk_reaction_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_reaction_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}message_deletions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `message_id` BIGINT UNSIGNED NOT NULL,

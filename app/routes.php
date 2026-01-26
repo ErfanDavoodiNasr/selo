@@ -65,6 +65,15 @@ $router->add('GET', '#^/api/messages$#', function () use ($config) {
 $router->add('POST', '#^/api/messages$#', function () use ($config) {
     MessageController::send($config);
 });
+$router->add('PUT', '#^/api/messages/(\\d+)/reaction$#', function ($matches) use ($config) {
+    MessageController::react($config, (int)$matches[1]);
+});
+$router->add('DELETE', '#^/api/messages/(\\d+)/reaction$#', function ($matches) use ($config) {
+    MessageController::removeReaction($config, (int)$matches[1]);
+});
+$router->add('GET', '#^/api/messages/(\\d+)/reactions$#', function ($matches) use ($config) {
+    MessageController::reactions($config, (int)$matches[1]);
+});
 $router->add('POST', '#^/api/uploads$#', function () use ($config) {
     UploadController::upload($config);
 });
