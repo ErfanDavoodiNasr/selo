@@ -4,6 +4,7 @@
     me: null,
     conversations: [],
     currentConversation: null,
+    currentGroup: null,
     replyTo: null,
     loadingMessages: false,
     oldestMessageId: null,
@@ -34,7 +35,8 @@
   const emojiPicker = document.getElementById('emoji-picker');
   const attachBtn = document.getElementById('attach-btn');
   const attachMenu = document.getElementById('attach-menu');
-  const mediaInput = document.getElementById('media-input');
+  const photoInput = document.getElementById('photo-input');
+  const videoInput = document.getElementById('video-input');
   const fileInput = document.getElementById('file-input');
   const attachmentPreview = document.getElementById('attachment-preview');
   const voiceBtn = document.getElementById('voice-btn');
@@ -56,10 +58,40 @@
   const replyPreview = document.getElementById('reply-preview');
   const replyCancel = document.getElementById('reply-cancel');
   const backToChats = document.getElementById('back-to-chats');
+  const groupSettingsBtn = document.getElementById('group-settings-btn');
+  const newGroupBtn = document.getElementById('new-group-btn');
+  const groupModal = document.getElementById('group-modal');
+  const groupModalClose = document.getElementById('group-modal-close');
+  const groupForm = document.getElementById('group-form');
+  const groupTitleInput = document.getElementById('group-title');
+  const groupPrivacySelect = document.getElementById('group-privacy');
+  const groupHandleRow = document.getElementById('group-handle-row');
+  const groupHandleInput = document.getElementById('group-handle');
+  const groupDescriptionInput = document.getElementById('group-description');
+  const groupMembersInput = document.getElementById('group-members');
+  const groupError = document.getElementById('group-error');
+
+  const groupSettingsModal = document.getElementById('group-settings-modal');
+  const groupSettingsClose = document.getElementById('group-settings-close');
+  const groupInfoHandle = document.getElementById('group-info-handle');
+  const groupInviteRow = document.getElementById('group-invite-row');
+  const groupInviteLink = document.getElementById('group-invite-link');
+  const groupInviteCopy = document.getElementById('group-invite-copy');
+  const groupAllowInvites = document.getElementById('group-allow-invites');
+  const groupAllowPhotos = document.getElementById('group-allow-photos');
+  const groupAllowVideos = document.getElementById('group-allow-videos');
+  const groupAllowVoice = document.getElementById('group-allow-voice');
+  const groupAllowFiles = document.getElementById('group-allow-files');
+  const groupSettingsSave = document.getElementById('group-settings-save');
+  const groupInviteUsername = document.getElementById('group-invite-username');
+  const groupInviteSubmit = document.getElementById('group-invite-submit');
+  const groupInviteError = document.getElementById('group-invite-error');
+  const groupMembersList = document.getElementById('group-members-list');
 
   const apiBase = window.SELO_CONFIG?.baseUrl || '';
   const baseUrl = apiBase.replace(/\/$/, '');
   const makeUrl = (path) => (baseUrl ? baseUrl + path : path);
+  const appUrl = () => (baseUrl || window.location.origin || '');
 
   function formatBytes(bytes) {
     if (!bytes && bytes !== 0) return '';
@@ -78,6 +110,55 @@
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function isGroupChat() {
+    return state.currentConversation?.chat_type === 'group';
+  }
+
+  function validGroupHandle(handle) {
+    return /^[a-z0-9_]+group$/.test(handle);
+  }
+
+  function toggleButton(btn, enabled) {
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle('disabled', !enabled);
+  }
+
+  function applyComposerPermissions() {
+    const isGroup = isGroupChat();
+    if (!isGroup) {
+      toggleButton(voiceBtn, true);
+      toggleAttachOption('photo', true);
+      toggleAttachOption('video', true);
+      toggleAttachOption('file', true);
+      return;
+    }
+    const group = state.currentGroup?.group;
+    if (!group) {
+      return;
+    }
+    toggleButton(voiceBtn, !!group.allow_voice);
+    toggleAttachOption('photo', !!group.allow_photos);
+    toggleAttachOption('video', !!group.allow_videos);
+    toggleAttachOption('file', !!group.allow_files);
+  }
+
+  function toggleAttachOption(type, enabled) {
+    const btn = attachMenu?.querySelector(`button[data-type=\"${type}\"]`);
+    toggleButton(btn, enabled);
+  }
+
+  function groupAllows(type) {
+    if (!isGroupChat()) return true;
+    const group = state.currentGroup?.group;
+    if (!group) return true;
+    if (type === 'photo') return !!group.allow_photos;
+    if (type === 'video') return !!group.allow_videos;
+    if (type === 'voice') return !!group.allow_voice;
+    if (type === 'file') return !!group.allow_files;
+    return true;
   }
 
   function getVideoMeta(att) {
@@ -121,6 +202,36 @@
   themeToggle.addEventListener('click', () => {
     const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
+  });
+
+  newGroupBtn?.addEventListener('click', () => {
+    groupError.textContent = '';
+    groupForm.reset();
+    groupHandleRow.classList.add('hidden');
+    openModal(groupModal);
+  });
+
+  groupModalClose?.addEventListener('click', () => closeModal(groupModal));
+  groupSettingsClose?.addEventListener('click', () => closeModal(groupSettingsModal));
+
+  groupModal?.addEventListener('click', (e) => {
+    if (e.target === groupModal) closeModal(groupModal);
+  });
+
+  groupSettingsModal?.addEventListener('click', (e) => {
+    if (e.target === groupSettingsModal) closeModal(groupSettingsModal);
+  });
+
+  groupPrivacySelect?.addEventListener('change', () => {
+    if (groupPrivacySelect.value === 'public') {
+      groupHandleRow.classList.remove('hidden');
+    } else {
+      groupHandleRow.classList.add('hidden');
+    }
+  });
+
+  groupHandleInput?.addEventListener('input', () => {
+    groupHandleInput.value = groupHandleInput.value.toLowerCase();
   });
 
   tabs.forEach(tab => {
@@ -332,10 +443,172 @@
     }, '/api/register');
   });
 
+  groupForm?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    createGroupFromForm();
+  });
+
+  groupSettingsBtn?.addEventListener('click', async () => {
+    if (!isGroupChat()) return;
+    if (!state.currentGroup) {
+      await loadGroupInfo(state.currentConversation.id);
+    }
+    populateGroupSettings();
+    openModal(groupSettingsModal);
+  });
+
+  groupSettingsSave?.addEventListener('click', async () => {
+    if (!state.currentGroup?.is_owner || !state.currentConversation) return;
+    const payload = {
+      allow_member_invites: groupAllowInvites.checked,
+      allow_photos: groupAllowPhotos.checked,
+      allow_videos: groupAllowVideos.checked,
+      allow_voice: groupAllowVoice.checked,
+      allow_files: groupAllowFiles.checked
+    };
+    const res = await apiFetch(`/api/groups/${state.currentConversation.id}`, { method: 'PATCH', body: payload });
+    if (res.data.ok) {
+      Object.assign(state.currentGroup.group, payload);
+      applyComposerPermissions();
+      await loadConversations();
+      populateGroupSettings();
+    }
+  });
+
+  groupInviteCopy?.addEventListener('click', async () => {
+    const text = groupInviteLink.value;
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      groupInviteLink.select();
+      document.execCommand('copy');
+    }
+  });
+
+  groupInviteSubmit?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (!state.currentConversation || !isGroupChat()) return;
+    if (!state.currentGroup?.can_invite) return;
+    const username = groupInviteUsername.value.trim().replace(/^@/, '');
+    groupInviteError.textContent = '';
+    if (!username) {
+      groupInviteError.textContent = 'نام کاربری را وارد کنید.';
+      return;
+    }
+    const res = await apiFetch(`/api/groups/${state.currentConversation.id}/invite`, { method: 'POST', body: { username } });
+    if (!res.data.ok) {
+      groupInviteError.textContent = res.data.error || 'خطا در دعوت عضو';
+      return;
+    }
+    groupInviteUsername.value = '';
+    await loadGroupInfo(state.currentConversation.id);
+    populateGroupSettings();
+    await loadConversations();
+  });
+
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  function openModal(modal) {
+    if (!modal) return;
+    modal.classList.remove('hidden');
+  }
+
+  function closeModal(modal) {
+    if (!modal) return;
+    modal.classList.add('hidden');
+  }
+
+  async function loadGroupInfo(groupId) {
+    const res = await apiFetch(`/api/groups/${groupId}`);
+    if (res.data.ok) {
+      state.currentGroup = res.data.data;
+      applyComposerPermissions();
+    }
+  }
+
+  function populateGroupSettings() {
+    if (!state.currentGroup) return;
+    const group = state.currentGroup.group;
+    const isOwner = state.currentGroup.is_owner;
+    const canInvite = state.currentGroup.can_invite;
+
+    groupInfoHandle.textContent = group.public_handle ? '@' + group.public_handle : 'خصوصی';
+    if (group.privacy_type === 'private' && state.currentGroup.invite_token && canInvite) {
+      groupInviteRow.classList.remove('hidden');
+      groupInviteLink.value = appUrl() + '/?invite=' + state.currentGroup.invite_token;
+    } else {
+      groupInviteRow.classList.add('hidden');
+      groupInviteLink.value = '';
+    }
+
+    groupAllowInvites.checked = !!group.allow_member_invites;
+    groupAllowPhotos.checked = !!group.allow_photos;
+    groupAllowVideos.checked = !!group.allow_videos;
+    groupAllowVoice.checked = !!group.allow_voice;
+    groupAllowFiles.checked = !!group.allow_files;
+
+    groupAllowInvites.disabled = !isOwner;
+    groupAllowPhotos.disabled = !isOwner;
+    groupAllowVideos.disabled = !isOwner;
+    groupAllowVoice.disabled = !isOwner;
+    groupAllowFiles.disabled = !isOwner;
+    groupSettingsSave.classList.toggle('hidden', !isOwner);
+
+    groupInviteUsername.disabled = !canInvite;
+    toggleButton(groupInviteSubmit, canInvite);
+    groupInviteError.textContent = '';
+    if (!canInvite) {
+      groupInviteUsername.value = '';
+    }
+
+    groupMembersList.innerHTML = '';
+    (state.currentGroup.members || []).forEach(member => {
+      const item = document.createElement('div');
+      item.className = 'member-item';
+      const meta = document.createElement('div');
+      meta.className = 'member-meta';
+      const avatar = document.createElement('div');
+      avatar.className = 'member-avatar';
+      if (member.photo_id) {
+        avatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + member.photo_id)})`;
+      } else {
+        avatar.textContent = '👤';
+      }
+      const text = document.createElement('div');
+      text.textContent = `${member.full_name} (@${member.username})`;
+      meta.appendChild(avatar);
+      meta.appendChild(text);
+
+      const actions = document.createElement('div');
+      if (isOwner && member.role !== 'owner') {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'action-btn';
+        removeBtn.textContent = 'حذف';
+        removeBtn.addEventListener('click', async () => {
+          await removeGroupMember(member.id);
+        });
+        actions.appendChild(removeBtn);
+      }
+
+      item.appendChild(meta);
+      item.appendChild(actions);
+      groupMembersList.appendChild(item);
+    });
+  }
+
+  async function removeGroupMember(memberId) {
+    if (!state.currentConversation || !isGroupChat()) return;
+    const res = await apiFetch(`/api/groups/${state.currentConversation.id}/members/${memberId}`, { method: 'DELETE' });
+    if (res.data.ok) {
+      await loadGroupInfo(state.currentConversation.id);
+      populateGroupSettings();
+      await loadConversations();
+    }
   }
 
   function formatTime(dateStr) {
@@ -368,15 +641,32 @@
       chatUserName.textContent = 'گفتگو';
       chatUserUsername.textContent = '';
       chatUserAvatar.style.backgroundImage = '';
+      chatUserAvatar.textContent = '';
+      groupSettingsBtn.classList.add('hidden');
+      return;
+    }
+    if (conversation.chat_type === 'group') {
+      chatUserName.textContent = conversation.title || 'گروه';
+      if (conversation.public_handle) {
+        chatUserUsername.textContent = '@' + conversation.public_handle;
+      } else {
+        chatUserUsername.textContent = 'گروه خصوصی';
+      }
+      chatUserAvatar.style.backgroundImage = '';
+      chatUserAvatar.textContent = '👥';
+      groupSettingsBtn.classList.remove('hidden');
       return;
     }
     chatUserName.textContent = conversation.other_name || conversation.other_username || '';
     chatUserUsername.textContent = '@' + conversation.other_username;
     if (conversation.other_photo) {
       chatUserAvatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + conversation.other_photo)})`;
+      chatUserAvatar.textContent = '';
     } else {
       chatUserAvatar.style.backgroundImage = '';
+      chatUserAvatar.textContent = '';
     }
+    groupSettingsBtn.classList.add('hidden');
   }
 
   function renderConversations() {
@@ -386,14 +676,16 @@
       item.className = 'chat-item';
       const avatar = document.createElement('div');
       avatar.className = 'avatar';
-      if (conv.other_photo) {
+      if (conv.chat_type === 'group') {
+        avatar.textContent = '👥';
+      } else if (conv.other_photo) {
         avatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + conv.other_photo)})`;
       }
       const details = document.createElement('div');
       details.className = 'details';
       const name = document.createElement('div');
       name.className = 'name';
-      name.textContent = conv.other_name || conv.other_username;
+      name.textContent = conv.chat_type === 'group' ? (conv.title || 'گروه') : (conv.other_name || conv.other_username);
       const preview = document.createElement('div');
       preview.className = 'preview';
       preview.textContent = conv.last_preview ? truncate(conv.last_preview, 40) : 'بدون پیام';
@@ -414,26 +706,117 @@
     }
   }
 
+  function parseUsernames(value) {
+    return value
+      .split(',')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(name => name.replace(/^@/, ''))
+      .filter(Boolean);
+  }
+
+  async function createGroupFromForm() {
+    const title = groupTitleInput.value.trim();
+    const privacy = groupPrivacySelect.value;
+    const handle = groupHandleInput.value.trim().toLowerCase();
+    const description = groupDescriptionInput.value.trim();
+    const membersRaw = groupMembersInput.value.trim();
+
+    groupError.textContent = '';
+    if (!title) {
+      groupError.textContent = 'عنوان گروه را وارد کنید.';
+      return;
+    }
+    if (privacy === 'public') {
+      if (!validGroupHandle(handle)) {
+        groupError.textContent = 'شناسه عمومی باید فقط حروف کوچک/عدد/زیرخط داشته باشد و با group تمام شود.';
+        return;
+      }
+    }
+
+    const payload = {
+      title,
+      privacy_type: privacy,
+      description
+    };
+    if (privacy === 'public') {
+      payload.public_handle = handle;
+    }
+
+    const res = await apiFetch('/api/groups', { method: 'POST', body: payload });
+    if (!res.data.ok) {
+      groupError.textContent = res.data.error || 'خطا در ساخت گروه';
+      return;
+    }
+
+    const groupId = res.data.data.group_id;
+    const members = parseUsernames(membersRaw);
+    for (const username of members) {
+      await apiFetch(`/api/groups/${groupId}/invite`, { method: 'POST', body: { username } });
+    }
+
+    closeModal(groupModal);
+    groupForm.reset();
+    groupHandleRow.classList.add('hidden');
+    await loadConversations();
+    const conv = state.conversations.find(c => c.chat_type === 'group' && c.id === groupId);
+    if (conv) {
+      await selectConversation(conv);
+    }
+  }
+
+  async function handleInviteLink() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('invite');
+    if (!token || !state.token) return;
+    const res = await apiFetch('/api/groups/join-by-link', { method: 'POST', body: { token } });
+    if (res.data.ok) {
+      await loadConversations();
+      const conv = state.conversations.find(c => c.chat_type === 'group' && c.id === res.data.data.group_id);
+      if (conv) {
+        await selectConversation(conv);
+      }
+    }
+    params.delete('invite');
+    const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+    window.history.replaceState({}, '', newUrl);
+  }
+
   async function selectConversation(conv) {
     state.currentConversation = conv;
+    state.currentGroup = null;
     state.oldestMessageId = null;
     messagesEl.innerHTML = '';
+    clearReply();
     setCurrentChatHeader(conv);
     document.body.classList.remove('show-chats');
+    if (isGroupChat()) {
+      await loadGroupInfo(conv.id);
+    }
+    applyComposerPermissions();
     await loadMessages();
   }
 
   async function loadMessages(beforeId = null) {
     if (!state.currentConversation || state.loadingMessages) return;
     state.loadingMessages = true;
-    const params = new URLSearchParams({
-      conversation_id: state.currentConversation.id,
-      limit: 30
-    });
-    if (beforeId) {
-      params.set('before_id', beforeId);
+    let res = null;
+    if (isGroupChat()) {
+      const params = new URLSearchParams({ limit: 30 });
+      if (beforeId) {
+        params.set('cursor', beforeId);
+      }
+      res = await apiFetch(`/api/groups/${state.currentConversation.id}/messages?` + params.toString());
+    } else {
+      const params = new URLSearchParams({
+        conversation_id: state.currentConversation.id,
+        limit: 30
+      });
+      if (beforeId) {
+        params.set('before_id', beforeId);
+      }
+      res = await apiFetch('/api/messages?' + params.toString());
     }
-    const res = await apiFetch('/api/messages?' + params.toString());
     if (res.data.ok) {
       const list = res.data.data;
       if (list.length > 0) {
@@ -562,6 +945,23 @@
       message.className = 'message ' + (msg.sender_id === state.me.id ? 'outgoing' : 'incoming');
       message.id = `msg-${msg.id}`;
 
+      if (isGroupChat()) {
+        const senderWrap = document.createElement('div');
+        senderWrap.className = 'message-sender';
+        const senderAvatar = document.createElement('div');
+        senderAvatar.className = 'sender-avatar';
+        if (msg.sender_photo_id) {
+          senderAvatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + msg.sender_photo_id)})`;
+        } else {
+          senderAvatar.textContent = '👤';
+        }
+        const senderName = document.createElement('span');
+        senderName.textContent = msg.sender_id === state.me.id ? 'شما' : (msg.sender_name || '');
+        senderWrap.appendChild(senderAvatar);
+        senderWrap.appendChild(senderName);
+        message.appendChild(senderWrap);
+      }
+
       if (msg.reply_id) {
         const reply = document.createElement('div');
         reply.className = 'reply-preview';
@@ -623,6 +1023,11 @@
     if (!state.currentConversation) return;
     if (state.pendingAttachment) {
       if (state.uploading) return;
+      if (!groupAllows(state.pendingAttachment.type)) {
+        alert('ارسال این نوع پیام در گروه مجاز نیست.');
+        clearAttachment();
+        return;
+      }
       state.uploading = true;
       try {
         const att = state.pendingAttachment;
@@ -636,14 +1041,19 @@
         }
         const uploadRes = await apiUpload(att.file, att.type, meta);
         const payload = {
-          conversation_id: state.currentConversation.id,
           type: att.type,
           media_id: uploadRes.media_id
         };
+        if (!isGroupChat()) {
+          payload.conversation_id = state.currentConversation.id;
+        }
         if (state.replyTo) {
           payload.reply_to_message_id = state.replyTo.id;
         }
-        const res = await apiFetch('/api/messages', { method: 'POST', body: payload });
+        const endpoint = isGroupChat()
+          ? `/api/groups/${state.currentConversation.id}/messages`
+          : '/api/messages';
+        const res = await apiFetch(endpoint, { method: 'POST', body: payload });
         if (res.data.ok) {
           clearAttachment();
           clearReply();
@@ -661,14 +1071,19 @@
     const body = messageInput.value.trim();
     if (!body) return;
     const payload = {
-      conversation_id: state.currentConversation.id,
       type: 'text',
       body: body
     };
+    if (!isGroupChat()) {
+      payload.conversation_id = state.currentConversation.id;
+    }
     if (state.replyTo) {
       payload.reply_to_message_id = state.replyTo.id;
     }
-    const res = await apiFetch('/api/messages', { method: 'POST', body: payload });
+    const endpoint = isGroupChat()
+      ? `/api/groups/${state.currentConversation.id}/messages`
+      : '/api/messages';
+    const res = await apiFetch(endpoint, { method: 'POST', body: payload });
     if (res.data.ok) {
       messageInput.value = '';
       clearReply();
@@ -753,11 +1168,13 @@
 
   attachMenu.addEventListener('click', (e) => {
     const button = e.target.closest('button');
-    if (!button) return;
+    if (!button || button.disabled) return;
     const type = button.dataset.type;
     attachMenu.classList.add('hidden');
-    if (type === 'media') {
-      mediaInput.click();
+    if (type === 'photo') {
+      photoInput.click();
+    } else if (type === 'video') {
+      videoInput.click();
     } else if (type === 'file') {
       fileInput.click();
     }
@@ -769,15 +1186,41 @@
     }
   });
 
-  mediaInput.addEventListener('change', () => {
-    const file = mediaInput.files[0];
-    mediaInput.value = '';
+  photoInput.addEventListener('change', () => {
+    const file = photoInput.files[0];
+    photoInput.value = '';
     if (!file) return;
+    if (!groupAllows('photo')) {
+      alert('ارسال عکس در این گروه مجاز نیست.');
+      return;
+    }
     clearAttachment();
-    const type = file.type.startsWith('image/') ? 'photo' : 'video';
     const previewUrl = URL.createObjectURL(file);
     setAttachment({
-      type,
+      type: 'photo',
+      file,
+      name: file.name,
+      size: file.size,
+      previewUrl,
+      duration: null,
+      width: null,
+      height: null,
+      progress: 0
+    });
+  });
+
+  videoInput.addEventListener('change', () => {
+    const file = videoInput.files[0];
+    videoInput.value = '';
+    if (!file) return;
+    if (!groupAllows('video')) {
+      alert('ارسال ویدیو در این گروه مجاز نیست.');
+      return;
+    }
+    clearAttachment();
+    const previewUrl = URL.createObjectURL(file);
+    setAttachment({
+      type: 'video',
       file,
       name: file.name,
       size: file.size,
@@ -793,6 +1236,10 @@
     const file = fileInput.files[0];
     fileInput.value = '';
     if (!file) return;
+    if (!groupAllows('file')) {
+      alert('ارسال فایل در این گروه مجاز نیست.');
+      return;
+    }
     clearAttachment();
     setAttachment({
       type: 'file',
@@ -882,6 +1329,10 @@
   }
 
   voiceBtn.addEventListener('click', () => {
+    if (!groupAllows('voice')) {
+      alert('ارسال پیام صوتی در این گروه مجاز نیست.');
+      return;
+    }
     if (state.recording.mediaRecorder) {
       return;
     }
@@ -981,7 +1432,8 @@
       showMain();
       initEmojiPicker();
       await loadConversations();
-      if (state.conversations.length > 0) {
+      await handleInviteLink();
+      if (!state.currentConversation && state.conversations.length > 0) {
         selectConversation(state.conversations[0]);
       }
     } catch (err) {

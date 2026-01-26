@@ -70,7 +70,10 @@ if (strpos($path, '/api/') === 0) {
             <aside class="sidebar">
                 <div class="sidebar-header">
                     <div class="brand-mini">SELO</div>
-                    <button id="theme-toggle" class="icon-btn" title="تغییر تم">🌓</button>
+                    <div class="sidebar-actions">
+                        <button id="new-group-btn" class="icon-btn" title="گروه جدید">👥+</button>
+                        <button id="theme-toggle" class="icon-btn" title="تغییر تم">🌓</button>
+                    </div>
                 </div>
                 <div class="sidebar-search">
                     <input id="user-search" type="text" placeholder="جستجوی نام کاربری...">
@@ -89,6 +92,7 @@ if (strpos($path, '/api/') === 0) {
                             <div id="chat-user-username" class="chat-user-username"></div>
                         </div>
                     </div>
+                    <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه">⚙️</button>
                 </div>
                 <div id="messages" class="messages"></div>
                 <div id="attachment-preview" class="attachment-preview hidden"></div>
@@ -113,7 +117,8 @@ if (strpos($path, '/api/') === 0) {
                 <div class="composer">
                     <button id="attach-btn" class="icon-btn" title="پیوست">📎</button>
                     <div id="attach-menu" class="attach-menu hidden">
-                        <button type="button" data-type="media">عکس / ویدیو</button>
+                        <button type="button" data-type="photo">عکس</button>
+                        <button type="button" data-type="video">ویدیو</button>
                         <button type="button" data-type="file">فایل</button>
                     </div>
                     <button id="emoji-btn" class="icon-btn">😊</button>
@@ -124,9 +129,99 @@ if (strpos($path, '/api/') === 0) {
                     <button id="voice-btn" class="icon-btn" title="پیام صوتی">🎤</button>
                     <button id="send-btn" class="send-btn">ارسال</button>
                 </div>
-                <input id="media-input" type="file" accept="image/*,video/*" class="hidden">
+                <input id="photo-input" type="file" accept="image/*" class="hidden">
+                <input id="video-input" type="file" accept="video/*" class="hidden">
                 <input id="file-input" type="file" class="hidden">
             </section>
+        </div>
+    </div>
+
+    <div id="group-modal" class="modal hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">گروه جدید</div>
+                <button id="group-modal-close" class="icon-btn">✖</button>
+            </div>
+            <form id="group-form" class="modal-body">
+                <label>عنوان گروه</label>
+                <input id="group-title" type="text" required>
+                <label>نوع گروه</label>
+                <select id="group-privacy">
+                    <option value="private">خصوصی (لینک دعوت)</option>
+                    <option value="public">عمومی (شناسه)</option>
+                </select>
+                <div id="group-handle-row" class="hidden">
+                    <label>شناسه عمومی (باید با group تمام شود)</label>
+                    <input id="group-handle" type="text" placeholder="مثال: funnygroup">
+                </div>
+                <label>توضیحات (اختیاری)</label>
+                <textarea id="group-description" rows="2" placeholder="درباره گروه..."></textarea>
+                <label>افزودن اعضا با نام کاربری (اختیاری)</label>
+                <input id="group-members" type="text" placeholder="user1, user2">
+                <div id="group-error" class="form-error"></div>
+                <button id="group-submit" type="submit" class="send-btn">ساخت گروه</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="group-settings-modal" class="modal hidden">
+        <div class="modal-card wide">
+            <div class="modal-header">
+                <div class="modal-title">تنظیمات گروه</div>
+                <button id="group-settings-close" class="icon-btn">✖</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <div class="section-title">اطلاعات گروه</div>
+                    <div class="info-row">
+                        <span>شناسه عمومی:</span>
+                        <span id="group-info-handle">-</span>
+                    </div>
+                    <div id="group-invite-row" class="info-row hidden">
+                        <span>لینک دعوت:</span>
+                        <div class="invite-wrap">
+                            <input id="group-invite-link" type="text" readonly>
+                            <button id="group-invite-copy" type="button" class="icon-btn" title="کپی">📋</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-title">مجوزها</div>
+                    <div class="toggle-row">
+                        <span>اجازه دعوت اعضا</span>
+                        <input id="group-allow-invites" type="checkbox">
+                    </div>
+                    <div class="toggle-row">
+                        <span>ارسال عکس</span>
+                        <input id="group-allow-photos" type="checkbox">
+                    </div>
+                    <div class="toggle-row">
+                        <span>ارسال ویدیو</span>
+                        <input id="group-allow-videos" type="checkbox">
+                    </div>
+                    <div class="toggle-row">
+                        <span>ارسال پیام صوتی</span>
+                        <input id="group-allow-voice" type="checkbox">
+                    </div>
+                    <div class="toggle-row">
+                        <span>ارسال فایل</span>
+                        <input id="group-allow-files" type="checkbox">
+                    </div>
+                    <button id="group-settings-save" class="send-btn">ذخیره تغییرات</button>
+                </div>
+                <div class="settings-section">
+                    <div class="section-title">دعوت عضو</div>
+                    <div class="invite-action">
+                        <input id="group-invite-username" type="text" placeholder="نام کاربری">
+                        <button id="group-invite-submit" class="send-btn small">دعوت</button>
+                    </div>
+                    <div id="group-invite-error" class="form-error"></div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-title">اعضا</div>
+                    <div id="group-members-list" class="members-list"></div>
+                </div>
+            </div>
         </div>
     </div>
 
