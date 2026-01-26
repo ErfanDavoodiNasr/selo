@@ -8,7 +8,30 @@ class Validator
         if (strlen($username) < 3 || strlen($username) > 32) {
             return false;
         }
-        return (bool) preg_match('/^[a-z0-9_]+$/', $username);
+        if (!preg_match('/^[a-z0-9_]+$/', $username)) {
+            return false;
+        }
+        if (self::usernameEndsWithGroup($username)) {
+            return false;
+        }
+        return true;
+    }
+
+    public static function usernameEndsWithGroup(string $username): bool
+    {
+        return (bool) preg_match('/group$/', strtolower($username));
+    }
+
+    public static function groupHandle(string $handle): bool
+    {
+        $handle = strtolower(trim($handle));
+        if (strlen($handle) < 5 || strlen($handle) > 32) {
+            return false;
+        }
+        if (!preg_match('/^[a-z0-9_]+$/', $handle)) {
+            return false;
+        }
+        return (bool) preg_match('/group$/', $handle);
     }
 
     public static function fullName(string $name): bool

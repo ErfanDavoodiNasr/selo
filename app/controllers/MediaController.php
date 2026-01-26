@@ -15,9 +15,13 @@ class MediaController
         $sql = 'SELECT mf.id, mf.file_name, mf.original_name, mf.mime_type, mf.type
                 FROM ' . $config['db']['prefix'] . 'media_files mf
                 JOIN ' . $config['db']['prefix'] . 'messages m ON m.media_id = mf.id
-                JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
                 WHERE mf.id = ?
-                  AND (c.user_one_id = ? OR c.user_two_id = ?)
+                  AND (
+                    (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
+                    OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+                  )
                   AND m.is_deleted_for_all = 0
                   AND NOT EXISTS (
                       SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
@@ -25,7 +29,7 @@ class MediaController
                   )
                 LIMIT 1';
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$mediaId, $user['id'], $user['id'], $user['id']]);
+        $stmt->execute([$user['id'], 'active', $mediaId, $user['id'], $user['id'], $user['id']]);
         $media = $stmt->fetch();
         if (!$media) {
             http_response_code(404);

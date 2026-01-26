@@ -65,11 +65,50 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}conversations` (
   CONSTRAINT `fk_conv_user_two` FOREIGN KEY (`user_two_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}groups` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `owner_user_id` INT UNSIGNED NOT NULL,
+  `title` VARCHAR(80) NOT NULL,
+  `description` VARCHAR(255) NULL,
+  `avatar_path` VARCHAR(255) NULL,
+  `privacy_type` ENUM('private', 'public') NOT NULL DEFAULT 'private',
+  `public_handle` VARCHAR(32) NULL,
+  `private_invite_token` VARCHAR(64) NULL,
+  `allow_member_invites` TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_photos` TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_videos` TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_voice` TINYINT(1) NOT NULL DEFAULT 1,
+  `allow_files` TINYINT(1) NOT NULL DEFAULT 1,
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_public_handle` (`public_handle`),
+  UNIQUE KEY `uniq_private_invite_token` (`private_invite_token`),
+  KEY `idx_owner_user_id` (`owner_user_id`),
+  KEY `idx_privacy` (`privacy_type`),
+  CONSTRAINT `fk_groups_owner` FOREIGN KEY (`owner_user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}group_members` (
+  `group_id` BIGINT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `role` ENUM('owner', 'member') NOT NULL DEFAULT 'member',
+  `status` ENUM('active', 'removed') NOT NULL DEFAULT 'active',
+  `joined_at` DATETIME NOT NULL,
+  `removed_at` DATETIME NULL,
+  PRIMARY KEY (`group_id`, `user_id`),
+  KEY `idx_user_status` (`user_id`, `status`),
+  KEY `idx_group_status` (`group_id`, `status`),
+  CONSTRAINT `fk_group_members_group` FOREIGN KEY (`group_id`) REFERENCES `{{prefix}}groups` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_group_members_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `conversation_id` BIGINT UNSIGNED NOT NULL,
+  `conversation_id` BIGINT UNSIGNED NULL,
+  `group_id` BIGINT UNSIGNED NULL,
   `sender_id` INT UNSIGNED NOT NULL,
-  `recipient_id` INT UNSIGNED NOT NULL,
+  `recipient_id` INT UNSIGNED NULL,
   `type` ENUM('text', 'voice', 'file', 'photo', 'video') NOT NULL DEFAULT 'text',
   `body` TEXT NULL,
   `media_id` BIGINT UNSIGNED NULL,
@@ -78,12 +117,15 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   `created_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_conversation` (`conversation_id`),
+  KEY `idx_group` (`group_id`),
+  KEY `idx_group_created` (`group_id`, `created_at`),
   KEY `idx_sender` (`sender_id`),
   KEY `idx_recipient` (`recipient_id`),
   KEY `idx_reply_to` (`reply_to_message_id`),
   KEY `idx_media_id` (`media_id`),
   KEY `idx_created_at` (`created_at`),
   CONSTRAINT `fk_msg_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_msg_group` FOREIGN KEY (`group_id`) REFERENCES `{{prefix}}groups` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_msg_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

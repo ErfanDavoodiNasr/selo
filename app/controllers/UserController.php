@@ -27,12 +27,19 @@ class UserController
         $user = Auth::requireUser($config);
         $data = Request::json();
         $fullName = trim($data['full_name'] ?? $user['full_name']);
+        $username = strtolower(trim($data['username'] ?? $user['username']));
         $bio = trim($data['bio'] ?? ($user['bio'] ?? ''));
         $phone = trim($data['phone'] ?? ($user['phone'] ?? ''));
         $email = strtolower(trim($data['email'] ?? $user['email']));
 
         if (!Validator::fullName($fullName)) {
             Response::json(['ok' => false, 'error' => 'نام کامل معتبر نیست.'], 422);
+        }
+        if (Validator::usernameEndsWithGroup($username)) {
+            Response::json(['ok' => false, 'error' => 'نام کاربری نباید با "group" تمام شود.'], 422);
+        }
+        if (!Validator::username($username)) {
+            Response::json(['ok' => false, 'error' => 'نام کاربری معتبر نیست.'], 422);
         }
         if (!Validator::bio($bio)) {
             Response::json(['ok' => false, 'error' => 'بیوگرافی بیش از حد طولانی است.'], 422);
@@ -45,6 +52,13 @@ class UserController
         }
 
         $pdo = Database::pdo();
+        if ($username !== $user['username']) {
+            $checkUsername = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE username = ? AND id != ? LIMIT 1');
+            $checkUsername->execute([$username, $user['id']]);
+            if ($checkUsername->fetch()) {
+                Response::json(['ok' => false, 'error' => 'این نام کاربری قبلاً استفاده شده است.'], 409);
+            }
+        }
         $check = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE email = ? AND id != ? LIMIT 1');
         $check->execute([$email, $user['id']]);
         if ($check->fetch()) {
@@ -52,8 +66,8 @@ class UserController
         }
 
         $now = date('Y-m-d H:i:s');
-        $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
-        $stmt->execute([$fullName, $bio, $phone, $email, $now, $user['id']]);
+        $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
+        $stmt->execute([$fullName, $username, $bio, $phone, $email, $now, $user['id']]);
         Response::json(['ok' => true]);
     }
 

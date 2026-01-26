@@ -21,6 +21,9 @@ class AuthController
         if (!Validator::fullName($fullName)) {
             Response::json(['ok' => false, 'error' => 'نام کامل معتبر نیست.'], 422);
         }
+        if (Validator::usernameEndsWithGroup($username)) {
+            Response::json(['ok' => false, 'error' => 'نام کاربری نباید با "group" تمام شود.'], 422);
+        }
         if (!Validator::username($username)) {
             Response::json(['ok' => false, 'error' => 'نام کاربری معتبر نیست.'], 422);
         }

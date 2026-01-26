@@ -177,8 +177,17 @@ class MessageController
             Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
         }
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE id = ? AND (sender_id = ? OR recipient_id = ?) LIMIT 1');
-        $stmt->execute([$messageId, $user['id'], $user['id']]);
+        $stmt = $pdo->prepare('SELECT m.id
+            FROM ' . $config['db']['prefix'] . 'messages m
+            LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+            LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+            WHERE m.id = ?
+              AND (
+                (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
+                OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+              )
+            LIMIT 1');
+        $stmt->execute([$user['id'], 'active', $messageId, $user['id'], $user['id']]);
         if (!$stmt->fetch()) {
             Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
         }
@@ -197,9 +206,29 @@ class MessageController
             Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
         }
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE id = ? AND (sender_id = ? OR recipient_id = ?) LIMIT 1');
-        $stmt->execute([$messageId, $user['id'], $user['id']]);
-        if (!$stmt->fetch()) {
+        $stmt = $pdo->prepare('SELECT m.id, m.conversation_id, m.group_id, m.sender_id, m.recipient_id,
+                g.owner_user_id,
+                gm.user_id AS member_id
+            FROM ' . $config['db']['prefix'] . 'messages m
+            LEFT JOIN ' . $config['db']['prefix'] . 'groups g ON g.id = m.group_id
+            LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+            WHERE m.id = ? LIMIT 1');
+        $stmt->execute([$user['id'], 'active', $messageId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+        $allowed = false;
+        if ($row['conversation_id'] !== null) {
+            if ((int)$row['sender_id'] === (int)$user['id'] || (int)$row['recipient_id'] === (int)$user['id']) {
+                $allowed = true;
+            }
+        } elseif ($row['group_id'] !== null) {
+            if (!empty($row['member_id']) && (((int)$row['sender_id'] === (int)$user['id']) || ((int)$row['owner_user_id'] === (int)$user['id']))) {
+                $allowed = true;
+            }
+        }
+        if (!$allowed) {
             Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
         }
         $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'messages SET is_deleted_for_all = 1 WHERE id = ?');
