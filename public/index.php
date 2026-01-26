@@ -225,6 +225,16 @@ if (strpos($path, '/api/') === 0) {
         </div>
     </div>
 
+    <div id="reaction-modal" class="modal hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div id="reaction-modal-title" class="modal-title">واکنش‌ها</div>
+                <button id="reaction-modal-close" class="icon-btn">✖</button>
+            </div>
+            <div id="reaction-modal-list" class="members-list"></div>
+        </div>
+    </div>
+
     <div id="lightbox" class="lightbox hidden">
         <div class="lightbox-inner">
             <img id="lightbox-img" alt="preview">

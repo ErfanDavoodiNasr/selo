@@ -470,6 +470,43 @@ body[data-theme="dark"] .attachment-preview {
   gap: 6px;
 }
 
+.reaction-bar {
+  position: absolute;
+  top: -36px;
+  right: 0;
+  background: var(--panel-light);
+  border-radius: 14px;
+  padding: 6px 8px;
+  display: flex;
+  gap: 6px;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+body[data-theme="dark"] .reaction-bar {
+  background: var(--panel-dark);
+}
+
+.message:hover .reaction-bar,
+.message.show-reactions .reaction-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.reaction-bar button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.reaction-bar button.active {
+  transform: scale(1.1);
+}
+
 .message-sender {
   display: flex;
   align-items: center;
@@ -551,6 +588,36 @@ body[data-theme="dark"] .message.outgoing {
 
 .message:hover .actions {
   display: flex;
+}
+
+.reaction-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.reaction-chip {
+  border: none;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  background: rgba(0,0,0,0.08);
+  color: inherit;
+}
+
+body[data-theme="dark"] .reaction-chip {
+  background: rgba(255,255,255,0.12);
+}
+
+.message.outgoing .reaction-chip {
+  background: rgba(255,255,255,0.2);
+  color: #fff;
+}
+
+.reaction-chip.active {
+  outline: 1px solid var(--blue);
 }
 
 .action-btn {

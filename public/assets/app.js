@@ -87,11 +87,16 @@
   const groupInviteSubmit = document.getElementById('group-invite-submit');
   const groupInviteError = document.getElementById('group-invite-error');
   const groupMembersList = document.getElementById('group-members-list');
+  const reactionModal = document.getElementById('reaction-modal');
+  const reactionModalClose = document.getElementById('reaction-modal-close');
+  const reactionModalTitle = document.getElementById('reaction-modal-title');
+  const reactionModalList = document.getElementById('reaction-modal-list');
 
   const apiBase = window.SELO_CONFIG?.baseUrl || '';
   const baseUrl = apiBase.replace(/\/$/, '');
   const makeUrl = (path) => (baseUrl ? baseUrl + path : path);
   const appUrl = () => (baseUrl || window.location.origin || '');
+  const allowedReactions = ['😂', '😜', '👍', '😘', '😁', '🤣', '😍', '🥰', '🤩', '😐', '😑', '🙄', '😬', '🤮', '😎', '🥳', '👎', '🙏'];
 
   function formatBytes(bytes) {
     if (!bytes && bytes !== 0) return '';
@@ -161,6 +166,137 @@
     return true;
   }
 
+  function buildReactionBar(messageId, currentReaction) {
+    const bar = document.createElement('div');
+    bar.className = 'reaction-bar';
+    allowedReactions.forEach((emoji) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = emoji;
+      if (currentReaction === emoji) {
+        btn.classList.add('active');
+      }
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleReaction(messageId, emoji);
+      });
+      bar.appendChild(btn);
+    });
+    return bar;
+  }
+
+  function buildReactionChips(messageId, reactions, currentReaction) {
+    if (!reactions || reactions.length === 0) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'reaction-chips';
+    reactions.forEach((reaction) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'reaction-chip';
+      if (currentReaction === reaction.emoji) {
+        chip.classList.add('active');
+      }
+      chip.textContent = `${reaction.emoji} ${reaction.count}`;
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openReactionModal(messageId, reaction.emoji);
+      });
+      wrap.appendChild(chip);
+    });
+    return wrap;
+  }
+
+  async function toggleReaction(messageId, emoji) {
+    const messageEl = document.getElementById(`msg-${messageId}`);
+    const current = messageEl?.dataset.currentReaction || '';
+    try {
+      if (current === emoji) {
+        await apiFetch(`/api/messages/${messageId}/reaction`, { method: 'DELETE' });
+      } else {
+        await apiFetch(`/api/messages/${messageId}/reaction`, { method: 'PUT', body: { emoji } });
+      }
+      await refreshReactions(messageId);
+      if (messageEl) {
+        messageEl.classList.remove('show-reactions');
+      }
+    } catch (err) {
+      alert(err.message || 'خطا در واکنش پیام');
+    }
+  }
+
+  async function refreshReactions(messageId) {
+    const res = await apiFetch(`/api/messages/${messageId}/reactions`);
+    if (!res.data.ok) return;
+    const info = res.data.data;
+    const messageEl = document.getElementById(`msg-${messageId}`);
+    if (!messageEl) return;
+    messageEl.dataset.currentReaction = info.current_user_reaction || '';
+    const bar = messageEl.querySelector('.reaction-bar');
+    if (bar) {
+      bar.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === info.current_user_reaction);
+      });
+    }
+    const oldChips = messageEl.querySelector('.reaction-chips');
+    if (oldChips) oldChips.remove();
+    const chips = buildReactionChips(messageId, info.reactions, info.current_user_reaction);
+    if (chips) {
+      messageEl.appendChild(chips);
+    }
+  }
+
+  async function openReactionModal(messageId, emoji) {
+    const res = await apiFetch(`/api/messages/${messageId}/reactions?emoji=${encodeURIComponent(emoji)}`);
+    if (!res.data.ok) return;
+    const reactions = res.data.data.reactions || [];
+    const entry = reactions.find(r => r.emoji === emoji);
+    const users = entry?.users || [];
+    reactionModalTitle.textContent = `واکنش‌ها ${emoji}`;
+    reactionModalList.innerHTML = '';
+    users.forEach((user) => {
+      const item = document.createElement('div');
+      item.className = 'member-item';
+      const meta = document.createElement('div');
+      meta.className = 'member-meta';
+      const avatar = document.createElement('div');
+      avatar.className = 'member-avatar';
+      if (user.photo_id) {
+        avatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + user.photo_id)})`;
+      } else {
+        avatar.textContent = '👤';
+      }
+      const text = document.createElement('div');
+      text.textContent = `${user.full_name} (@${user.username})`;
+      meta.appendChild(avatar);
+      meta.appendChild(text);
+      item.appendChild(meta);
+      reactionModalList.appendChild(item);
+    });
+    openModal(reactionModal);
+  }
+
+  function attachReactionLongPress(messageEl) {
+    let timer = null;
+    messageEl.addEventListener('touchstart', () => {
+      timer = setTimeout(() => {
+        messageEl.classList.add('show-reactions');
+      }, 400);
+    });
+    messageEl.addEventListener('touchend', () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    });
+    messageEl.addEventListener('touchcancel', () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      messageEl.classList.remove('show-reactions');
+    });
+  }
+
   function getVideoMeta(att) {
     return new Promise((resolve) => {
       if (!att || !att.file) {
@@ -213,6 +349,7 @@
 
   groupModalClose?.addEventListener('click', () => closeModal(groupModal));
   groupSettingsClose?.addEventListener('click', () => closeModal(groupSettingsModal));
+  reactionModalClose?.addEventListener('click', () => closeModal(reactionModal));
 
   groupModal?.addEventListener('click', (e) => {
     if (e.target === groupModal) closeModal(groupModal);
@@ -220,6 +357,10 @@
 
   groupSettingsModal?.addEventListener('click', (e) => {
     if (e.target === groupSettingsModal) closeModal(groupSettingsModal);
+  });
+
+  reactionModal?.addEventListener('click', (e) => {
+    if (e.target === reactionModal) closeModal(reactionModal);
   });
 
   groupPrivacySelect?.addEventListener('change', () => {
@@ -944,6 +1085,10 @@
       const message = document.createElement('div');
       message.className = 'message ' + (msg.sender_id === state.me.id ? 'outgoing' : 'incoming');
       message.id = `msg-${msg.id}`;
+      message.dataset.currentReaction = msg.current_user_reaction || '';
+
+      const reactionBar = buildReactionBar(msg.id, msg.current_user_reaction);
+      message.appendChild(reactionBar);
 
       if (isGroupChat()) {
         const senderWrap = document.createElement('div');
@@ -1003,11 +1148,17 @@
       actions.appendChild(delAllBtn);
       message.appendChild(actions);
 
+      const chips = buildReactionChips(msg.id, msg.reactions || [], msg.current_user_reaction);
+      if (chips) {
+        message.appendChild(chips);
+      }
+
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent = formatTime(msg.created_at);
       message.appendChild(meta);
 
+      attachReactionLongPress(message);
       fragment.appendChild(message);
     });
 
@@ -1138,6 +1289,11 @@
           element.prepend(text);
         }
         text.textContent = 'این پیام حذف شد.';
+        const chips = element.querySelector('.reaction-chips');
+        if (chips) chips.remove();
+        const bar = element.querySelector('.reaction-bar');
+        if (bar) bar.remove();
+        element.dataset.currentReaction = '';
       }
       await loadConversations();
     }
@@ -1183,6 +1339,14 @@
   document.addEventListener('click', (e) => {
     if (!attachMenu.contains(e.target) && e.target !== attachBtn) {
       attachMenu.classList.add('hidden');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.reaction-bar')) {
+      document.querySelectorAll('.message.show-reactions').forEach((el) => {
+        el.classList.remove('show-reactions');
+      });
     }
   });
 
