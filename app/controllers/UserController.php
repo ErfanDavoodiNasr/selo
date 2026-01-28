@@ -13,7 +13,7 @@ class UserController
     {
         $user = Auth::requireUser($config);
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, allow_voice_calls FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
         $stmt->execute([$user['id']]);
         $fresh = $stmt->fetch();
         $photosStmt = $pdo->prepare('SELECT id, file_name, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? ORDER BY created_at DESC');
@@ -69,6 +69,28 @@ class UserController
         $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
         $stmt->execute([$fullName, $username, $bio, $phone, $email, $now, $user['id']]);
         Response::json(['ok' => true]);
+    }
+
+    public static function updateSettings(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        if (!array_key_exists('allow_voice_calls', $data)) {
+            Response::json(['ok' => false, 'error' => 'پارامتر نامعتبر است.'], 422);
+        }
+
+        $parsed = filter_var($data['allow_voice_calls'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($parsed === null) {
+            Response::json(['ok' => false, 'error' => 'مقدار نامعتبر است.'], 422);
+        }
+
+        $allowValue = $parsed ? 1 : 0;
+        $pdo = Database::pdo();
+        $now = date('Y-m-d H:i:s');
+        $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET allow_voice_calls = ?, updated_at = ? WHERE id = ?');
+        $stmt->execute([$allowValue, $now, $user['id']]);
+
+        Response::json(['ok' => true, 'data' => ['allow_voice_calls' => (bool)$allowValue]]);
     }
 
     public static function search(array $config): void

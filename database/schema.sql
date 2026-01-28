@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `language` VARCHAR(10) NOT NULL DEFAULT 'fa',
   `active_photo_id` BIGINT UNSIGNED NULL,
+  `allow_voice_calls` TINYINT(1) NOT NULL DEFAULT 1,
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),

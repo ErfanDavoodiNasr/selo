@@ -127,7 +127,7 @@ async function validateCall(callerId, calleeId, conversationId) {
     });
     const data = await res.json().catch(() => null);
     if (!data || !data.ok) {
-      return { ok: false, error: data?.error || 'validate_failed' };
+      return { ok: false, error: data?.error || 'validate_failed', message: data?.message || '' };
     }
     return { ok: true, data: data.data };
   } catch (err) {
@@ -198,7 +198,11 @@ async function handleCallStart(ws, msg) {
 
   const validation = await validateCall(callerId, calleeId, conversationId);
   if (!validation.ok) {
-    send(ws, { type: 'call_failed', message: 'not_allowed' });
+    if (validation.error === 'CALLS_DISABLED') {
+      send(ws, { type: 'call_failed', code: 'CALLS_DISABLED', message: validation.message || 'calls_disabled' });
+    } else {
+      send(ws, { type: 'call_failed', message: 'not_allowed' });
+    }
     return;
   }
 

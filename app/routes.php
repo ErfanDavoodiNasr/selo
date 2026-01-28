@@ -24,6 +24,9 @@ $router->add('GET', '#^/api/me$#', function () use ($config) {
 $router->add('POST', '#^/api/me$#', function () use ($config) {
     UserController::update($config);
 });
+$router->add('PATCH', '#^/api/me/settings$#', function () use ($config) {
+    UserController::updateSettings($config);
+});
 $router->add('GET', '#^/api/users/search$#', function () use ($config) {
     UserController::search($config);
 });

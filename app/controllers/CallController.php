@@ -48,6 +48,7 @@ class CallController
     public static function token(array $config): void
     {
         $user = Auth::requireUser($config);
+        $data = Request::json();
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $rate = $config['calls']['rate_limit'] ?? [];
         $max = (int)($rate['max_attempts'] ?? 6);
@@ -59,6 +60,50 @@ class CallController
             Response::json(['ok' => false, 'error' => 'تلاش‌های زیاد. لطفاً کمی بعد تلاش کنید.'], 429);
         }
         RateLimiter::hitCustom($ip, $identifier, $config, $max, $window, $lock);
+
+        $calleeId = (int)($data['callee_id'] ?? 0);
+        $conversationId = (int)($data['conversation_id'] ?? 0);
+        if ($calleeId > 0) {
+            if ($calleeId === (int)$user['id']) {
+                Response::json(['ok' => false, 'error' => 'Invalid payload.'], 422);
+            }
+            $pdo = Database::pdo();
+            if ($conversationId > 0) {
+                $check = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? AND (user_one_id = ? OR user_two_id = ?) LIMIT 1');
+                $check->execute([$conversationId, $user['id'], $user['id']]);
+                $row = $check->fetch();
+                if (!$row) {
+                    Response::json(['ok' => false, 'error' => 'Unauthorized.'], 403);
+                }
+                $pair = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? AND ((user_one_id = ? AND user_two_id = ?) OR (user_one_id = ? AND user_two_id = ?)) LIMIT 1');
+                $pair->execute([$conversationId, $user['id'], $calleeId, $calleeId, $user['id']]);
+                if (!$pair->fetch()) {
+                    Response::json(['ok' => false, 'error' => 'Unauthorized.'], 403);
+                }
+            } else {
+                $u1 = min($user['id'], $calleeId);
+                $u2 = max($user['id'], $calleeId);
+                $check = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'conversations WHERE user_one_id = ? AND user_two_id = ? LIMIT 1');
+                $check->execute([$u1, $u2]);
+                if (!$check->fetch()) {
+                    Response::json(['ok' => false, 'error' => 'Unauthorized.'], 403);
+                }
+            }
+
+            $stmt = $pdo->prepare('SELECT allow_voice_calls FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
+            $stmt->execute([$calleeId]);
+            $callee = $stmt->fetch();
+            if (!$callee) {
+                Response::json(['ok' => false, 'error' => 'User not found.'], 404);
+            }
+            if ((int)$callee['allow_voice_calls'] !== 1) {
+                Response::json([
+                    'ok' => false,
+                    'error' => 'CALLS_DISABLED',
+                    'message' => 'این کاربر تماس صوتی را غیرفعال کرده است.'
+                ], 403);
+            }
+        }
 
         $ttl = (int)($config['calls']['token_ttl_seconds'] ?? 120);
         $ttl = $ttl > 0 ? $ttl : 120;
@@ -126,7 +171,7 @@ class CallController
             Response::json(['ok' => false, 'error' => 'Unauthorized.'], 403);
         }
 
-        $uStmt = $pdo->prepare('SELECT id, full_name, username, active_photo_id FROM ' . $config['db']['prefix'] . 'users WHERE id IN (?, ?)');
+        $uStmt = $pdo->prepare('SELECT id, full_name, username, active_photo_id, allow_voice_calls FROM ' . $config['db']['prefix'] . 'users WHERE id IN (?, ?)');
         $uStmt->execute([$callerId, $calleeId]);
         $users = $uStmt->fetchAll();
         $map = [];
@@ -136,18 +181,36 @@ class CallController
                 'full_name' => $u['full_name'],
                 'username' => $u['username'],
                 'photo_id' => $u['active_photo_id'] !== null ? (int)$u['active_photo_id'] : null,
+                'allow_voice_calls' => (int)$u['allow_voice_calls'],
             ];
         }
         if (!isset($map[$callerId]) || !isset($map[$calleeId])) {
             Response::json(['ok' => false, 'error' => 'User not found.'], 404);
+        }
+        if ((int)$map[$calleeId]['allow_voice_calls'] !== 1) {
+            Response::json([
+                'ok' => false,
+                'error' => 'CALLS_DISABLED',
+                'message' => 'این کاربر تماس صوتی را غیرفعال کرده است.'
+            ], 403);
         }
 
         Response::json([
             'ok' => true,
             'data' => [
                 'conversation_id' => $conversationId,
-                'caller' => $map[$callerId],
-                'callee' => $map[$calleeId],
+                'caller' => [
+                    'id' => $map[$callerId]['id'],
+                    'full_name' => $map[$callerId]['full_name'],
+                    'username' => $map[$callerId]['username'],
+                    'photo_id' => $map[$callerId]['photo_id'],
+                ],
+                'callee' => [
+                    'id' => $map[$calleeId]['id'],
+                    'full_name' => $map[$calleeId]['full_name'],
+                    'username' => $map[$calleeId]['username'],
+                    'photo_id' => $map[$calleeId]['photo_id'],
+                ],
             ],
         ]);
     }

@@ -73,6 +73,7 @@ if (strpos($path, '/api/') === 0) {
                     <div class="brand-mini">SELO</div>
                     <div class="sidebar-actions">
                         <button id="new-group-btn" class="icon-btn" title="گروه جدید">👥+</button>
+                        <button id="user-settings-btn" class="icon-btn" title="تنظیمات حساب">⚙️</button>
                         <button id="theme-toggle" class="icon-btn" title="تغییر تم">🌓</button>
                     </div>
                 </div>
@@ -222,6 +223,27 @@ if (strpos($path, '/api/') === 0) {
                 <div class="settings-section">
                     <div class="section-title">اعضا</div>
                     <div id="group-members-list" class="members-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="user-settings-modal" class="modal hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">تنظیمات حساب</div>
+                <button id="user-settings-close" class="icon-btn">✖</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <div class="section-title">حریم خصوصی</div>
+                    <div class="toggle-row">
+                        <div class="toggle-text">
+                            <span>اجازه تماس صوتی</span>
+                            <div class="toggle-desc">اگر خاموش باشد، هیچکس نمی‌تواند با شما تماس بگیرد.</div>
+                        </div>
+                        <input id="allow-voice-calls-toggle" type="checkbox">
+                    </div>
                 </div>
             </div>
         </div>

@@ -112,6 +112,10 @@
   const reactionModalClose = document.getElementById('reaction-modal-close');
   const reactionModalTitle = document.getElementById('reaction-modal-title');
   const reactionModalList = document.getElementById('reaction-modal-list');
+  const userSettingsBtn = document.getElementById('user-settings-btn');
+  const userSettingsModal = document.getElementById('user-settings-modal');
+  const userSettingsClose = document.getElementById('user-settings-close');
+  const allowVoiceCallsToggle = document.getElementById('allow-voice-calls-toggle');
 
   const callOverlay = document.getElementById('call-overlay');
   const callAvatar = document.getElementById('call-avatar');
@@ -168,6 +172,13 @@
 
   function isGroupChat() {
     return state.currentConversation?.chat_type === 'group';
+  }
+
+  function peerAllowsCalls(conversation) {
+    if (!conversation || conversation.chat_type !== 'direct') return false;
+    if (conversation.other_allow_voice_calls === false) return false;
+    if (conversation.other_allow_voice_calls === 0) return false;
+    return true;
   }
 
   function validGroupHandle(handle) {
@@ -384,10 +395,13 @@
     }, 1200);
   }
 
-  async function fetchCallToken() {
-    const res = await apiFetch('/api/calls/token', { method: 'POST', body: {} });
+  async function fetchCallToken(payload = null) {
+    const res = await apiFetch('/api/calls/token', { method: 'POST', body: payload || {} });
     if (!res.data.ok) {
-      throw new Error(res.data.error || 'خطا در دریافت توکن تماس');
+      const message = res.data.message || res.data.error || 'خطا در دریافت توکن تماس';
+      const err = new Error(message);
+      err.code = res.data.error || '';
+      throw err;
     }
     return res.data.data.token;
   }
@@ -500,10 +514,25 @@
         handleRemoteEnd(msg, msg.reason === 'completed' ? 'ended' : (msg.reason || 'ended'));
         break;
       case 'call_failed':
-        handleRemoteEnd(msg, 'failed');
+        handleCallFailed(msg);
         break;
       default:
         break;
+    }
+  }
+
+  function handleCallFailed(msg) {
+    if (msg?.code === 'CALLS_DISABLED' || msg?.message === 'calls_disabled') {
+      alert('این کاربر تماس صوتی را غیرفعال کرده است.');
+    } else if (msg?.message === 'rate_limited') {
+      alert('تلاش‌های زیاد. لطفاً کمی بعد تلاش کنید.');
+    } else if (msg?.message === 'not_allowed') {
+      alert('دسترسی تماس مجاز نیست.');
+    } else if (msg?.message === 'invalid_payload') {
+      alert('درخواست تماس نامعتبر است.');
+    }
+    if (state.call.session) {
+      finalizeCall('failed');
     }
   }
 
@@ -687,6 +716,10 @@
     }
     if (!callConfig.signalingUrl) {
       alert('سیگنالینگ تماس تنظیم نشده است.');
+      return;
+    }
+    if (!peerAllowsCalls(state.currentConversation)) {
+      alert('این کاربر تماس صوتی را غیرفعال کرده است.');
       return;
     }
     const ready = await ensureSignalingConnected();
@@ -1006,6 +1039,11 @@
     setTheme(newTheme);
   });
 
+  userSettingsBtn?.addEventListener('click', () => {
+    syncUserSettingsUI();
+    openModal(userSettingsModal);
+  });
+
   audioCallBtn?.addEventListener('click', startOutgoingCall);
   if (window.CallUI && typeof window.CallUI.on === 'function') {
     window.CallUI.on('accept', acceptIncomingCall);
@@ -1040,6 +1078,7 @@
 
   groupModalClose?.addEventListener('click', () => closeModal(groupModal));
   groupSettingsClose?.addEventListener('click', () => closeModal(groupSettingsModal));
+  userSettingsClose?.addEventListener('click', () => closeModal(userSettingsModal));
   reactionModalClose?.addEventListener('click', () => closeModal(reactionModal));
 
   groupModal?.addEventListener('click', (e) => {
@@ -1050,8 +1089,16 @@
     if (e.target === groupSettingsModal) closeModal(groupSettingsModal);
   });
 
+  userSettingsModal?.addEventListener('click', (e) => {
+    if (e.target === userSettingsModal) closeModal(userSettingsModal);
+  });
+
   reactionModal?.addEventListener('click', (e) => {
     if (e.target === reactionModal) closeModal(reactionModal);
+  });
+
+  allowVoiceCallsToggle?.addEventListener('change', () => {
+    updateAllowVoiceCalls(!!allowVoiceCallsToggle.checked);
   });
 
   groupPrivacySelect?.addEventListener('change', () => {
@@ -1355,6 +1402,30 @@
     modal.classList.add('hidden');
   }
 
+  function syncUserSettingsUI() {
+    if (!allowVoiceCallsToggle) return;
+    allowVoiceCallsToggle.checked = !!state.me?.allow_voice_calls;
+  }
+
+  async function updateAllowVoiceCalls(enabled) {
+    if (!state.me || !allowVoiceCallsToggle) return;
+    const previous = !!state.me.allow_voice_calls;
+    allowVoiceCallsToggle.disabled = true;
+    try {
+      const res = await apiFetch('/api/me/settings', { method: 'PATCH', body: { allow_voice_calls: enabled } });
+      if (!res.data.ok) {
+        throw new Error(res.data.message || res.data.error || 'خطا در ذخیره تنظیمات');
+      }
+      state.me.allow_voice_calls = !!res.data.data.allow_voice_calls;
+      allowVoiceCallsToggle.checked = !!state.me.allow_voice_calls;
+    } catch (err) {
+      allowVoiceCallsToggle.checked = previous;
+      alert(err.message || 'خطا در ذخیره تنظیمات');
+    } finally {
+      allowVoiceCallsToggle.disabled = false;
+    }
+  }
+
   async function loadGroupInfo(groupId) {
     const res = await apiFetch(`/api/groups/${groupId}`);
     if (res.data.ok) {
@@ -1503,7 +1574,16 @@
     groupSettingsBtn.classList.add('hidden');
     if (audioCallBtn) {
       audioCallBtn.classList.remove('hidden');
-      audioCallBtn.disabled = !callConfig.signalingUrl;
+      const allowed = peerAllowsCalls(conversation);
+      const canCall = !!callConfig.signalingUrl && allowed;
+      toggleButton(audioCallBtn, canCall);
+      if (!callConfig.signalingUrl) {
+        audioCallBtn.title = 'سیگنالینگ تماس تنظیم نشده است.';
+      } else if (!allowed) {
+        audioCallBtn.title = 'این کاربر تماس صوتی را غیرفعال کرده است.';
+      } else {
+        audioCallBtn.title = 'تماس صوتی';
+      }
     }
   }
 
@@ -2291,6 +2371,7 @@
       }
       state.me = meRes.data.data.user;
       showMain();
+      syncUserSettingsUI();
       initEmojiPicker();
       connectSignaling();
       await loadConversations();
