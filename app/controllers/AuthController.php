@@ -7,6 +7,7 @@ use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Validator;
+use App\Core\Logger;
 
 class AuthController
 {
@@ -19,19 +20,24 @@ class AuthController
         $password = $data['password'] ?? '';
 
         if (!Validator::fullName($fullName)) {
+            Logger::warn('register_failed', ['reason' => 'invalid_full_name', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کامل معتبر نیست.'], 422);
         }
         if (Validator::usernameEndsWithGroup($username)) {
+            Logger::warn('register_failed', ['reason' => 'username_reserved', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری نباید با "group" تمام شود.'], 422);
         }
         if (!Validator::username($username)) {
+            Logger::warn('register_failed', ['reason' => 'invalid_username', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری معتبر نیست.'], 422);
         }
         if (!Validator::gmail($email)) {
+            Logger::warn('register_failed', ['reason' => 'invalid_email', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'فقط ایمیل‌های Gmail مجاز هستند.'], 422);
         }
         $passwordErrors = Validator::password($password);
         if (!empty($passwordErrors)) {
+            Logger::warn('register_failed', ['reason' => 'weak_password', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => implode(' ', $passwordErrors)], 422);
         }
 
@@ -39,6 +45,7 @@ class AuthController
         $stmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE username = ? OR email = ? LIMIT 1');
         $stmt->execute([$username, $email]);
         if ($stmt->fetch()) {
+            Logger::warn('register_failed', ['reason' => 'duplicate_user', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری یا ایمیل قبلاً ثبت شده است.'], 409);
         }
 
@@ -51,6 +58,7 @@ class AuthController
         $user = ['id' => (int)$userId, 'full_name' => $fullName, 'username' => $username, 'email' => $email];
         $token = Auth::issueToken($user, $config);
 
+        Logger::info('register_success', ['user_id' => (int)$userId, 'username' => $username], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
     }
 
@@ -62,10 +70,12 @@ class AuthController
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 
         if ($identifier === '' || $password === '') {
+            Logger::warn('login_failed', ['reason' => 'missing_credentials', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'اطلاعات ورود ناقص است.'], 422);
         }
 
         if (RateLimiter::tooManyAttempts($ip, $identifier, $config)) {
+            Logger::warn('login_failed', ['reason' => 'rate_limited', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'تلاش‌های ناموفق زیاد است. لطفاً بعداً تلاش کنید.'], 429);
         }
 
@@ -76,11 +86,13 @@ class AuthController
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
             RateLimiter::hit($ip, $identifier, $config);
+            Logger::warn('login_failed', ['reason' => 'invalid_credentials', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری/ایمیل یا رمز عبور اشتباه است.'], 401);
         }
 
         RateLimiter::clear($ip, $identifier, $config);
         $token = Auth::issueToken($user, $config);
+        Logger::info('login_success', ['user_id' => (int)$user['id'], 'username' => $user['username']], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
     }
 }

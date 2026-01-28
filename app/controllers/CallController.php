@@ -7,6 +7,7 @@ use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Utils;
+use App\Core\Logger;
 
 class CallController
 {
@@ -234,7 +235,14 @@ class CallController
             }
             $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'call_logs (conversation_id, caller_id, callee_id, started_at) VALUES (?, ?, ?, ?)');
             $insert->execute([$conversationId, $callerId, $calleeId, $now]);
-            Response::json(['ok' => true, 'data' => ['call_log_id' => (int)$pdo->lastInsertId()]]);
+            $callLogId = (int)$pdo->lastInsertId();
+            Logger::info('call_start', [
+                'call_log_id' => $callLogId,
+                'conversation_id' => $conversationId,
+                'caller_id' => $callerId,
+                'callee_id' => $calleeId,
+            ], 'call');
+            Response::json(['ok' => true, 'data' => ['call_log_id' => $callLogId]]);
         }
 
         if ($event === 'answer') {
@@ -265,6 +273,11 @@ class CallController
             }
             $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'call_logs SET ended_at = ?, end_reason = ?, duration_seconds = ? WHERE id = ?');
             $update->execute([$now, $reason, $duration, $callLogId]);
+            Logger::info('call_end', [
+                'call_log_id' => $callLogId,
+                'end_reason' => $reason,
+                'duration_seconds' => $duration,
+            ], 'call');
             Response::json(['ok' => true]);
         }
 

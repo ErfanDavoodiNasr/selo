@@ -7,6 +7,7 @@ use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Validator;
+use App\Core\Logger;
 
 class GroupController
 {
@@ -81,6 +82,16 @@ class GroupController
 
         $member = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'group_members (group_id, user_id, role, status, joined_at, removed_at) VALUES (?, ?, ?, ?, ?, NULL)');
         $member->execute([$groupId, $user['id'], 'owner', 'active', $now]);
+
+        Logger::info('group_created', [
+            'group_id' => $groupId,
+            'privacy' => $privacy,
+            'allow_invites' => $allowInvites,
+            'allow_photos' => $allowPhotos,
+            'allow_videos' => $allowVideos,
+            'allow_voice' => $allowVoice,
+            'allow_files' => $allowFiles,
+        ], 'group');
 
         Response::json(['ok' => true, 'data' => ['group_id' => $groupId]]);
     }
@@ -168,6 +179,7 @@ class GroupController
         $data = Request::json();
         $fields = [];
         $params = [];
+        $changed = [];
 
         if (array_key_exists('title', $data)) {
             $title = trim((string)$data['title']);
@@ -176,6 +188,7 @@ class GroupController
             }
             $fields[] = 'title = ?';
             $params[] = $title;
+            $changed[] = 'title';
         }
 
         if (array_key_exists('description', $data)) {
@@ -185,6 +198,7 @@ class GroupController
             }
             $fields[] = 'description = ?';
             $params[] = $desc !== '' ? $desc : null;
+            $changed[] = 'description';
         }
 
         $flags = ['allow_member_invites', 'allow_photos', 'allow_videos', 'allow_voice', 'allow_files'];
@@ -192,6 +206,7 @@ class GroupController
             if (array_key_exists($flag, $data)) {
                 $fields[] = $flag . ' = ?';
                 $params[] = (int)!!$data[$flag];
+                $changed[] = $flag;
             }
         }
 
@@ -205,6 +220,11 @@ class GroupController
 
         $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET ' . implode(', ', $fields) . ' WHERE id = ?');
         $stmt->execute($params);
+
+        Logger::info('group_updated', [
+            'group_id' => $groupId,
+            'fields' => implode(',', $changed),
+        ], 'group');
 
         Response::json(['ok' => true]);
     }
@@ -297,6 +317,7 @@ class GroupController
         }
 
         self::upsertMember($pdo, $config, $groupId, $targetId);
+        Logger::info('group_invite', ['group_id' => $groupId, 'target_id' => $targetId], 'group');
         Response::json(['ok' => true]);
     }
 
@@ -325,6 +346,7 @@ class GroupController
         $now = date('Y-m-d H:i:s');
         $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'group_members SET status = ?, removed_at = ? WHERE group_id = ? AND user_id = ?');
         $update->execute(['removed', $now, $groupId, $memberId]);
+        Logger::info('group_remove_member', ['group_id' => $groupId, 'member_id' => $memberId], 'group');
         Response::json(['ok' => true]);
     }
 

@@ -4,6 +4,7 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\Database;
 use App\Core\Response;
+use App\Core\Logger;
 
 class UploadController
 {
@@ -13,27 +14,32 @@ class UploadController
     {
         $user = Auth::requireUser($config);
         if (!isset($_FILES['file'])) {
+            Logger::warn('upload_failed', ['reason' => 'missing_file'], 'upload');
             Response::json(['ok' => false, 'error' => 'فایل ارسال نشده است.'], 422);
         }
 
         $type = strtolower(trim($_POST['type'] ?? ''));
         $allowedTypes = ['voice', 'file', 'photo', 'video'];
         if (!in_array($type, $allowedTypes, true)) {
+            Logger::warn('upload_failed', ['reason' => 'invalid_type', 'type' => $type], 'upload');
             Response::json(['ok' => false, 'error' => 'نوع فایل نامعتبر است.'], 422);
         }
 
         $file = $_FILES['file'];
         if ($file['error'] !== UPLOAD_ERR_OK) {
+            Logger::warn('upload_failed', ['reason' => 'upload_error', 'code' => $file['error']], 'upload');
             Response::json(['ok' => false, 'error' => 'آپلود فایل ناموفق بود.'], 400);
         }
 
         $limits = self::sizeLimits($config);
         $maxSize = $limits[$type] ?? $limits['default'];
         if ($file['size'] > $maxSize) {
+            Logger::warn('upload_failed', ['reason' => 'size_exceeded', 'type' => $type, 'size' => (int)$file['size']], 'upload');
             Response::json(['ok' => false, 'error' => 'حجم فایل بیش از حد مجاز است.'], 422);
         }
 
         if (!is_uploaded_file($file['tmp_name'])) {
+            Logger::warn('upload_failed', ['reason' => 'invalid_upload', 'type' => $type], 'upload');
             Response::json(['ok' => false, 'error' => 'فایل معتبر نیست.'], 400);
         }
 
@@ -46,6 +52,7 @@ class UploadController
             'voice' => ['audio/ogg', 'audio/webm', 'audio/mpeg', 'audio/wav', 'audio/mp4'],
         ];
         if ($type !== 'file' && !in_array($mime, $allowedMimes[$type] ?? [], true)) {
+            Logger::warn('upload_failed', ['reason' => 'invalid_mime', 'type' => $type, 'mime' => $mime], 'upload');
             Response::json(['ok' => false, 'error' => 'فرمت فایل مجاز نیست.'], 422);
         }
 
@@ -71,11 +78,13 @@ class UploadController
             @mkdir($mediaDir, 0755, true);
         }
         if (!is_dir($mediaDir) || !is_writable($mediaDir)) {
+            Logger::error('upload_failed', ['reason' => 'media_dir_not_writable', 'type' => $type], 'upload');
             Response::json(['ok' => false, 'error' => 'مسیر آپلود قابل نوشتن نیست.'], 500);
         }
 
         $destination = rtrim($mediaDir, '/') . '/' . $filename;
         if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            Logger::error('upload_failed', ['reason' => 'move_failed', 'type' => $type], 'upload');
             Response::json(['ok' => false, 'error' => 'ذخیره فایل ممکن نیست.'], 500);
         }
 
@@ -113,6 +122,13 @@ class UploadController
             $now,
         ]);
         $mediaId = (int)$pdo->lastInsertId();
+
+        Logger::info('upload_success', [
+            'media_id' => $mediaId,
+            'type' => $type,
+            'size' => (int)$file['size'],
+            'mime' => $mime,
+        ], 'upload');
 
         Response::json([
             'ok' => true,
