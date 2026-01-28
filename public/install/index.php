@@ -27,6 +27,50 @@ function checkCsrf(): bool
 $step = $_GET['step'] ?? '1';
 $errors = [];
 
+function defaultAppUrl(): string
+{
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $appUrl = $scheme . '://' . $host;
+    $baseDir = rtrim(str_replace('/install', '', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+    if ($baseDir !== '') {
+        $appUrl .= $baseDir;
+    }
+    return $appUrl;
+}
+
+function bytesToMb(int $bytes): int
+{
+    return (int)round($bytes / (1024 * 1024));
+}
+
+function parseUploadMb(string $key, int $defaultBytes, array &$errors, string $label): int
+{
+    $raw = trim($_POST[$key] ?? '');
+    if ($raw === '') {
+        return $defaultBytes;
+    }
+    if (!is_numeric($raw)) {
+        $errors[] = $label . ' نامعتبر است.';
+        return $defaultBytes;
+    }
+    $value = (float)$raw;
+    if ($value <= 0) {
+        $errors[] = $label . ' باید بزرگ‌تر از صفر باشد.';
+        return $defaultBytes;
+    }
+    return (int)round($value * 1024 * 1024);
+}
+
+$defaultUploads = [
+    'max_size' => 2 * 1024 * 1024,
+    'media_max_size' => 20 * 1024 * 1024,
+    'photo_max_size' => 5 * 1024 * 1024,
+    'video_max_size' => 25 * 1024 * 1024,
+    'voice_max_size' => 10 * 1024 * 1024,
+    'file_max_size' => 20 * 1024 * 1024,
+];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrf()) {
         $errors[] = 'توکن امنیتی نامعتبر است.';
@@ -132,42 +176,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$db) {
             $errors[] = 'اطلاعات پایگاه داده یافت نشد.';
         } else {
-            $appUrl = (!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
-            $baseDir = rtrim(str_replace('/install', '', dirname($_SERVER['SCRIPT_NAME'])), '/');
-            if ($baseDir !== '') {
-                $appUrl .= $baseDir;
+            $defaultAppUrl = defaultAppUrl();
+            $appUrlInput = trim($_POST['app_url'] ?? '');
+            $appUrl = $appUrlInput !== '' ? $appUrlInput : $defaultAppUrl;
+            $jwtSecret = trim($_POST['jwt_secret'] ?? '');
+            if ($jwtSecret === '') {
+                $jwtSecret = bin2hex(random_bytes(32));
             }
 
-            $config = [
-                'installed' => true,
-                'app' => [
-                    'name' => 'SELO',
-                    'name_fa' => 'سلو',
-                    'url' => $appUrl,
-                    'timezone' => 'Asia/Tehran',
-                    'jwt_secret' => bin2hex(random_bytes(32)),
-                ],
-                'db' => $db,
-                'uploads' => [
-                    'dir' => $basePath . '/storage/uploads',
-                    'max_size' => 2 * 1024 * 1024,
-                    'media_dir' => $basePath . '/storage/uploads/media',
-                    'media_max_size' => 20 * 1024 * 1024,
-                    'photo_max_size' => 5 * 1024 * 1024,
-                    'video_max_size' => 25 * 1024 * 1024,
-                    'voice_max_size' => 10 * 1024 * 1024,
-                    'file_max_size' => 20 * 1024 * 1024,
-                ],
+            $uploads = [
+                'dir' => $basePath . '/storage/uploads',
+                'max_size' => parseUploadMb('upload_max_size', $defaultUploads['max_size'], $errors, 'حداکثر حجم آواتار'),
+                'media_dir' => $basePath . '/storage/uploads/media',
+                'media_max_size' => parseUploadMb('upload_media_max_size', $defaultUploads['media_max_size'], $errors, 'حداکثر حجم رسانه'),
+                'photo_max_size' => parseUploadMb('upload_photo_max_size', $defaultUploads['photo_max_size'], $errors, 'حداکثر حجم عکس'),
+                'video_max_size' => parseUploadMb('upload_video_max_size', $defaultUploads['video_max_size'], $errors, 'حداکثر حجم ویدیو'),
+                'voice_max_size' => parseUploadMb('upload_voice_max_size', $defaultUploads['voice_max_size'], $errors, 'حداکثر حجم ویس'),
+                'file_max_size' => parseUploadMb('upload_file_max_size', $defaultUploads['file_max_size'], $errors, 'حداکثر حجم فایل'),
             ];
 
-            $export = "<?php\nreturn " . var_export($config, true) . ";\n";
-            if (!is_dir($basePath . '/config')) {
-                mkdir($basePath . '/config', 0755, true);
+            if (empty($errors)) {
+                $config = [
+                    'installed' => true,
+                    'app' => [
+                        'name' => 'SELO',
+                        'name_fa' => 'سلو',
+                        'url' => $appUrl,
+                        'timezone' => 'Asia/Tehran',
+                        'jwt_secret' => $jwtSecret,
+                    ],
+                    'db' => $db,
+                    'uploads' => $uploads,
+                ];
+
+                $export = "<?php\nreturn " . var_export($config, true) . ";\n";
+                if (!is_dir($basePath . '/config')) {
+                    mkdir($basePath . '/config', 0755, true);
+                }
+                file_put_contents($configFile, $export);
+                $_SESSION['install_done'] = true;
+                header('Location: /install/?step=finish');
+                exit;
             }
-            file_put_contents($configFile, $export);
-            $_SESSION['install_done'] = true;
-            header('Location: /install/?step=finish');
-            exit;
         }
     }
 }
@@ -193,6 +243,28 @@ if ($step === 'finish') {
     $stepView = 'finish';
 }
 
+$step4Defaults = [
+    'app_url' => defaultAppUrl(),
+    'jwt_secret' => '',
+    'upload_max_size' => bytesToMb($defaultUploads['max_size']),
+    'upload_media_max_size' => bytesToMb($defaultUploads['media_max_size']),
+    'upload_photo_max_size' => bytesToMb($defaultUploads['photo_max_size']),
+    'upload_video_max_size' => bytesToMb($defaultUploads['video_max_size']),
+    'upload_voice_max_size' => bytesToMb($defaultUploads['voice_max_size']),
+    'upload_file_max_size' => bytesToMb($defaultUploads['file_max_size']),
+];
+
+$step4Values = [
+    'app_url' => $_POST['app_url'] ?? $step4Defaults['app_url'],
+    'jwt_secret' => $_POST['jwt_secret'] ?? $step4Defaults['jwt_secret'],
+    'upload_max_size' => $_POST['upload_max_size'] ?? $step4Defaults['upload_max_size'],
+    'upload_media_max_size' => $_POST['upload_media_max_size'] ?? $step4Defaults['upload_media_max_size'],
+    'upload_photo_max_size' => $_POST['upload_photo_max_size'] ?? $step4Defaults['upload_photo_max_size'],
+    'upload_video_max_size' => $_POST['upload_video_max_size'] ?? $step4Defaults['upload_video_max_size'],
+    'upload_voice_max_size' => $_POST['upload_voice_max_size'] ?? $step4Defaults['upload_voice_max_size'],
+    'upload_file_max_size' => $_POST['upload_file_max_size'] ?? $step4Defaults['upload_file_max_size'],
+];
+
 ?><!doctype html>
 <html lang="fa" dir="rtl">
 <head>
@@ -215,6 +287,15 @@ if ($step === 'finish') {
         .secondary { background: #6b7280; }
         .row { display: flex; gap: 16px; }
         .row > div { flex: 1; }
+        .input-row { display: flex; gap: 12px; align-items: flex-start; }
+        .input-row .grow { flex: 1; }
+        .input-row .actions { width: 200px; display: flex; flex-direction: column; gap: 10px; }
+        .input-row .actions button { width: 100%; margin-top: 0; }
+        .checkbox-inline { display: flex; gap: 8px; align-items: center; margin: 0; }
+        @media (max-width: 640px) {
+            .input-row { flex-direction: column; }
+            .input-row .actions { width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -225,7 +306,7 @@ if ($step === 'finish') {
             <div class="step">۱. بررسی</div>
             <div class="step">۲. پایگاه داده</div>
             <div class="step">۳. مدیر</div>
-            <div class="step">۴. پایان</div>
+            <div class="step">۴. تنظیمات</div>
         </div>
 
         <?php if (!empty($errors)): ?>
@@ -284,9 +365,55 @@ if ($step === 'finish') {
             </form>
 
         <?php elseif ($stepView === '4'): ?>
-            <h3>تولید فایل تنظیمات</h3>
+            <h3>تنظیمات برنامه</h3>
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?php echo csrfToken(); ?>">
+                <label>آدرس برنامه (URL)</label>
+                <input type="text" name="app_url" value="<?php echo htmlspecialchars($step4Values['app_url'], ENT_QUOTES, 'UTF-8'); ?>" required>
+                <label>کلید JWT (خالی بگذارید تا خودکار ساخته شود)</label>
+                <div class="input-row">
+                    <div class="grow">
+                        <input type="password" id="jwt_secret" name="jwt_secret" value="<?php echo htmlspecialchars($step4Values['jwt_secret'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div class="actions">
+                        <button type="button" id="generate-jwt" class="secondary">تولید کلید</button>
+                        <label class="checkbox-inline">
+                            <input type="checkbox" id="toggle-jwt">
+                            نمایش کلید
+                        </label>
+                    </div>
+                </div>
+                <h4>محدودیت حجم آپلود (مگابایت)</h4>
+                <div class="row">
+                    <div>
+                        <label>آواتار</label>
+                        <input type="number" name="upload_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div>
+                        <label>رسانه عمومی</label>
+                        <input type="number" name="upload_media_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_media_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                </div>
+                <div class="row">
+                    <div>
+                        <label>عکس</label>
+                        <input type="number" name="upload_photo_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_photo_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div>
+                        <label>ویدیو</label>
+                        <input type="number" name="upload_video_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_video_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                </div>
+                <div class="row">
+                    <div>
+                        <label>ویس</label>
+                        <input type="number" name="upload_voice_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_voice_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div>
+                        <label>فایل</label>
+                        <input type="number" name="upload_file_max_size" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['upload_file_max_size'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                </div>
                 <button type="submit">ایجاد فایل تنظیمات</button>
             </form>
 
@@ -297,4 +424,42 @@ if ($step === 'finish') {
         <?php endif; ?>
     </div>
 </body>
+<script>
+    (function () {
+        var jwtInput = document.getElementById('jwt_secret');
+        var toggle = document.getElementById('toggle-jwt');
+        var generateBtn = document.getElementById('generate-jwt');
+        if (!jwtInput || !toggle || !generateBtn) {
+            return;
+        }
+
+        function generateHex(bytes) {
+            if (!window.crypto || !window.crypto.getRandomValues) {
+                return '';
+            }
+            var array = new Uint8Array(bytes);
+            window.crypto.getRandomValues(array);
+            var out = '';
+            for (var i = 0; i < array.length; i++) {
+                out += array[i].toString(16).padStart(2, '0');
+            }
+            return out;
+        }
+
+        toggle.addEventListener('change', function () {
+            jwtInput.type = toggle.checked ? 'text' : 'password';
+        });
+
+        generateBtn.addEventListener('click', function () {
+            var secret = generateHex(32);
+            if (secret) {
+                jwtInput.value = secret;
+                jwtInput.type = 'text';
+                toggle.checked = true;
+            } else {
+                alert('مرورگر شما از تولید امن کلید پشتیبانی نمی‌کند.');
+            }
+        });
+    })();
+</script>
 </html>

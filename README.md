@@ -51,8 +51,10 @@ SELO is a Telegram‑like messenger for shared hosting. It supports private chat
 Installer steps:
 1. Requirements check
 2. Database connection
-3. Config generation (`config/config.php`)
-4. Finish
+3. Admin (optional)
+4. Settings (app URL, JWT, uploads)
+5. Config generation (`config/config.php`)
+6. Finish
 
 **After install**
 - Delete or lock `/install`
