@@ -70,6 +70,18 @@ $defaultUploads = [
     'voice_max_size' => 10 * 1024 * 1024,
     'file_max_size' => 20 * 1024 * 1024,
 ];
+$defaultCalls = [
+    'token_ttl_seconds' => 120,
+    'ring_timeout_seconds' => 45,
+    'rate_limit' => [
+        'max_attempts' => 6,
+        'window_minutes' => 1,
+        'lock_minutes' => 2,
+    ],
+    'ice_servers' => [
+        ['urls' => ['stun:stun.l.google.com:19302']],
+    ],
+];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrf()) {
@@ -183,6 +195,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($jwtSecret === '') {
                 $jwtSecret = bin2hex(random_bytes(32));
             }
+            $signalingSecret = trim($_POST['signaling_secret'] ?? '');
+            if ($signalingSecret === '') {
+                $signalingSecret = bin2hex(random_bytes(32));
+            }
 
             $uploads = [
                 'dir' => $basePath . '/storage/uploads',
@@ -196,6 +212,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
 
             if (empty($errors)) {
+                $signalingUrl = preg_replace('#^http#i', 'ws', $appUrl);
+                $signalingUrl = rtrim($signalingUrl, '/') . '/ws';
+                $calls = [
+                    'signaling_url' => $signalingUrl,
+                    'signaling_secret' => $signalingSecret,
+                    'token_ttl_seconds' => $defaultCalls['token_ttl_seconds'],
+                    'ring_timeout_seconds' => $defaultCalls['ring_timeout_seconds'],
+                    'rate_limit' => $defaultCalls['rate_limit'],
+                    'ice_servers' => $defaultCalls['ice_servers'],
+                ];
                 $config = [
                     'installed' => true,
                     'app' => [
@@ -207,6 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ],
                     'db' => $db,
                     'uploads' => $uploads,
+                    'calls' => $calls,
                 ];
 
                 $export = "<?php\nreturn " . var_export($config, true) . ";\n";
@@ -246,6 +273,7 @@ if ($step === 'finish') {
 $step4Defaults = [
     'app_url' => defaultAppUrl(),
     'jwt_secret' => '',
+    'signaling_secret' => '',
     'upload_max_size' => bytesToMb($defaultUploads['max_size']),
     'upload_media_max_size' => bytesToMb($defaultUploads['media_max_size']),
     'upload_photo_max_size' => bytesToMb($defaultUploads['photo_max_size']),
@@ -257,6 +285,7 @@ $step4Defaults = [
 $step4Values = [
     'app_url' => $_POST['app_url'] ?? $step4Defaults['app_url'],
     'jwt_secret' => $_POST['jwt_secret'] ?? $step4Defaults['jwt_secret'],
+    'signaling_secret' => $_POST['signaling_secret'] ?? $step4Defaults['signaling_secret'],
     'upload_max_size' => $_POST['upload_max_size'] ?? $step4Defaults['upload_max_size'],
     'upload_media_max_size' => $_POST['upload_media_max_size'] ?? $step4Defaults['upload_media_max_size'],
     'upload_photo_max_size' => $_POST['upload_photo_max_size'] ?? $step4Defaults['upload_photo_max_size'],
@@ -383,6 +412,19 @@ $step4Values = [
                         </label>
                     </div>
                 </div>
+                <label>کلید سیگنالینگ تماس (خالی بگذارید تا خودکار ساخته شود)</label>
+                <div class="input-row">
+                    <div class="grow">
+                        <input type="password" id="signaling_secret" name="signaling_secret" value="<?php echo htmlspecialchars($step4Values['signaling_secret'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div class="actions">
+                        <button type="button" id="generate-signaling" class="secondary">تولید کلید</button>
+                        <label class="checkbox-inline">
+                            <input type="checkbox" id="toggle-signaling">
+                            نمایش کلید
+                        </label>
+                    </div>
+                </div>
                 <h4>محدودیت حجم آپلود (مگابایت)</h4>
                 <div class="row">
                     <div>
@@ -426,13 +468,6 @@ $step4Values = [
 </body>
 <script>
     (function () {
-        var jwtInput = document.getElementById('jwt_secret');
-        var toggle = document.getElementById('toggle-jwt');
-        var generateBtn = document.getElementById('generate-jwt');
-        if (!jwtInput || !toggle || !generateBtn) {
-            return;
-        }
-
         function generateHex(bytes) {
             if (!window.crypto || !window.crypto.getRandomValues) {
                 return '';
@@ -446,20 +481,32 @@ $step4Values = [
             return out;
         }
 
-        toggle.addEventListener('change', function () {
-            jwtInput.type = toggle.checked ? 'text' : 'password';
-        });
-
-        generateBtn.addEventListener('click', function () {
-            var secret = generateHex(32);
-            if (secret) {
-                jwtInput.value = secret;
-                jwtInput.type = 'text';
-                toggle.checked = true;
-            } else {
-                alert('مرورگر شما از تولید امن کلید پشتیبانی نمی‌کند.');
+        function bindSecretControls(inputId, toggleId, buttonId) {
+            var input = document.getElementById(inputId);
+            var toggle = document.getElementById(toggleId);
+            var generateBtn = document.getElementById(buttonId);
+            if (!input || !toggle || !generateBtn) {
+                return;
             }
-        });
+
+            toggle.addEventListener('change', function () {
+                input.type = toggle.checked ? 'text' : 'password';
+            });
+
+            generateBtn.addEventListener('click', function () {
+                var secret = generateHex(32);
+                if (secret) {
+                    input.value = secret;
+                    input.type = 'text';
+                    toggle.checked = true;
+                } else {
+                    alert('مرورگر شما از تولید امن کلید پشتیبانی نمی‌کند.');
+                }
+            });
+        }
+
+        bindSecretControls('jwt_secret', 'toggle-jwt', 'generate-jwt');
+        bindSecretControls('signaling_secret', 'toggle-signaling', 'generate-signaling');
     })();
 </script>
 </html>

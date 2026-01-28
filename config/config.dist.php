@@ -25,4 +25,18 @@ return [
         'voice_max_size' => 10 * 1024 * 1024,
         'file_max_size' => 20 * 1024 * 1024,
     ],
+    'calls' => [
+        'signaling_url' => 'ws://localhost:3001/ws',
+        'signaling_secret' => 'CHANGE_ME',
+        'token_ttl_seconds' => 120,
+        'ring_timeout_seconds' => 45,
+        'rate_limit' => [
+            'max_attempts' => 6,
+            'window_minutes' => 1,
+            'lock_minutes' => 2,
+        ],
+        'ice_servers' => [
+            ['urls' => ['stun:stun.l.google.com:19302']],
+        ],
+    ],
 ];

@@ -8,6 +8,7 @@ use App\Controllers\UploadController;
 use App\Controllers\MediaController;
 use App\Controllers\ProfileController;
 use App\Controllers\GroupController;
+use App\Controllers\CallController;
 
 $router = new Router();
 
@@ -91,6 +92,18 @@ $router->add('POST', '#^/api/profile/photo$#', function () use ($config) {
 });
 $router->add('POST', '#^/api/profile/photo/active$#', function () use ($config) {
     ProfileController::setActive($config);
+});
+$router->add('POST', '#^/api/calls/token$#', function () use ($config) {
+    CallController::token($config);
+});
+$router->add('GET', '#^/api/calls/history$#', function () use ($config) {
+    CallController::history($config);
+});
+$router->add('POST', '#^/api/calls/validate$#', function () use ($config) {
+    CallController::validate($config);
+});
+$router->add('POST', '#^/api/calls/event$#', function () use ($config) {
+    CallController::event($config);
 });
 
 $router->dispatch($_SERVER['REQUEST_METHOD'], $path);

@@ -129,6 +129,26 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   CONSTRAINT `fk_msg_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}call_logs` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `conversation_id` BIGINT UNSIGNED NOT NULL,
+  `caller_id` INT UNSIGNED NOT NULL,
+  `callee_id` INT UNSIGNED NOT NULL,
+  `started_at` DATETIME NOT NULL,
+  `answered_at` DATETIME NULL,
+  `ended_at` DATETIME NULL,
+  `end_reason` ENUM('completed', 'declined', 'missed', 'busy', 'failed', 'canceled') NULL,
+  `duration_seconds` INT UNSIGNED NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_call_conversation` (`conversation_id`),
+  KEY `idx_call_caller` (`caller_id`),
+  KEY `idx_call_callee` (`callee_id`),
+  KEY `idx_call_started` (`started_at`),
+  CONSTRAINT `fk_call_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_call_caller` FOREIGN KEY (`caller_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_call_callee` FOREIGN KEY (`callee_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}message_reactions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `message_id` BIGINT UNSIGNED NOT NULL,
