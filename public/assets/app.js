@@ -17,6 +17,26 @@
       startTime: 0,
       blob: null,
       duration: 0
+    },
+    call: {
+      ws: null,
+      wsConnected: false,
+      wsConnecting: false,
+      reconnectTimer: null,
+      session: null,
+      pendingCandidates: [],
+      pendingOffer: null,
+      pendingAccept: false,
+      pendingCancel: false,
+      pc: null,
+      localStream: null,
+      remoteStream: null,
+      callTimerId: null,
+      callStartAt: 0,
+      restarting: false,
+      muted: false,
+      sinkId: null,
+      outputDevices: []
     }
   };
 
@@ -59,6 +79,7 @@
   const replyCancel = document.getElementById('reply-cancel');
   const backToChats = document.getElementById('back-to-chats');
   const groupSettingsBtn = document.getElementById('group-settings-btn');
+  const audioCallBtn = document.getElementById('audio-call-btn');
   const newGroupBtn = document.getElementById('new-group-btn');
   const groupModal = document.getElementById('group-modal');
   const groupModalClose = document.getElementById('group-modal-close');
@@ -92,11 +113,39 @@
   const reactionModalTitle = document.getElementById('reaction-modal-title');
   const reactionModalList = document.getElementById('reaction-modal-list');
 
+  const callOverlay = document.getElementById('call-overlay');
+  const callAvatar = document.getElementById('call-avatar');
+  const callName = document.getElementById('call-name');
+  const callStatus = document.getElementById('call-status');
+  const callTimer = document.getElementById('call-timer');
+  const callAcceptBtn = document.getElementById('call-accept-btn');
+  const callDeclineBtn = document.getElementById('call-decline-btn');
+  const callHangupBtn = document.getElementById('call-hangup-btn');
+  const callMuteBtn = document.getElementById('call-mute-btn');
+  const callSpeakerBtn = document.getElementById('call-speaker-btn');
+  const remoteAudio = document.getElementById('remote-audio');
+
   const apiBase = window.SELO_CONFIG?.baseUrl || '';
   const baseUrl = apiBase.replace(/\/$/, '');
   const makeUrl = (path) => (baseUrl ? baseUrl + path : path);
   const appUrl = () => (baseUrl || window.location.origin || '');
   const allowedReactions = ['😂', '😜', '👍', '😘', '😁', '🤣', '😍', '🥰', '🤩', '😐', '😑', '🙄', '😬', '🤮', '😎', '🥳', '👎', '🙏'];
+
+  function deriveSignalingUrl() {
+    const base = appUrl();
+    if (!base) return '';
+    return base.replace(/^http/i, 'ws').replace(/\/$/, '') + '/ws';
+  }
+
+  const callConfig = (() => {
+    const cfg = window.SELO_CONFIG?.calls || {};
+    const signalingUrl = cfg.signalingUrl || deriveSignalingUrl();
+    const ringTimeoutSeconds = Number(cfg.ringTimeoutSeconds || 45);
+    const iceServers = Array.isArray(cfg.iceServers) && cfg.iceServers.length
+      ? cfg.iceServers
+      : [{ urls: ['stun:stun.l.google.com:19302'] }];
+    return { signalingUrl, ringTimeoutSeconds, iceServers };
+  })();
 
   function formatBytes(bytes) {
     if (!bytes && bytes !== 0) return '';
@@ -164,6 +213,582 @@
     if (type === 'voice') return !!group.allow_voice;
     if (type === 'file') return !!group.allow_files;
     return true;
+  }
+
+  const callStatusLabels = {
+    calling: 'در حال تماس...',
+    ringing: 'در حال زنگ...',
+    incoming: 'تماس ورودی',
+    connecting: 'در حال اتصال...',
+    connected: 'در تماس',
+    reconnecting: 'در حال اتصال مجدد...',
+    busy: 'مشغول',
+    declined: 'رد شد',
+    missed: 'بی‌پاسخ',
+    canceled: 'لغو شد',
+    failed: 'ناموفق',
+    ended: 'پایان تماس'
+  };
+
+  function setCallPeer(peer) {
+    if (!peer) return;
+    if (callName) {
+      callName.textContent = peer.full_name || peer.username || 'تماس';
+    }
+    if (callAvatar) {
+      if (peer.photo_id) {
+        callAvatar.style.backgroundImage = `url(${makeUrl('/photo.php?id=' + peer.photo_id)})`;
+        callAvatar.textContent = '';
+      } else {
+        callAvatar.style.backgroundImage = '';
+        callAvatar.textContent = '';
+      }
+    }
+  }
+
+  function showCallOverlay() {
+    callOverlay?.classList.remove('hidden');
+  }
+
+  function hideCallOverlay() {
+    callOverlay?.classList.add('hidden');
+  }
+
+  function setCallStatus(status) {
+    if (state.call.session) {
+      state.call.session.status = status;
+    }
+    if (callStatus) {
+      callStatus.textContent = callStatusLabels[status] || '';
+    }
+    updateCallControls();
+  }
+
+  function updateCallControls() {
+    if (!state.call.session) return;
+    const status = state.call.session.status || '';
+    const isIncoming = state.call.session.direction === 'incoming' && !state.call.session.accepted;
+    callAcceptBtn?.classList.toggle('hidden', !isIncoming);
+    callDeclineBtn?.classList.toggle('hidden', !isIncoming);
+
+    const showHangup = ['calling', 'ringing', 'connecting', 'connected', 'reconnecting'].includes(status);
+    callHangupBtn?.classList.toggle('hidden', !showHangup);
+    if (callHangupBtn) {
+      callHangupBtn.textContent = status === 'connected' ? 'قطع' : 'لغو';
+    }
+
+    const showAudioControls = ['connected', 'reconnecting'].includes(status);
+    callMuteBtn?.classList.toggle('hidden', !showAudioControls);
+    callSpeakerBtn?.classList.toggle('hidden', !showAudioControls);
+
+    if (callMuteBtn) {
+      callMuteBtn.textContent = state.call.muted ? 'وصل میکروفون' : 'بی‌صدا';
+    }
+  }
+
+  function startCallTimer() {
+    if (state.call.callTimerId) return;
+    state.call.callStartAt = Date.now();
+    if (callTimer) {
+      callTimer.textContent = '00:00';
+    }
+    state.call.callTimerId = setInterval(() => {
+      const seconds = Math.floor((Date.now() - state.call.callStartAt) / 1000);
+      if (callTimer) {
+        callTimer.textContent = formatDuration(seconds);
+      }
+    }, 1000);
+  }
+
+  function stopCallTimer() {
+    if (state.call.callTimerId) {
+      clearInterval(state.call.callTimerId);
+      state.call.callTimerId = null;
+    }
+    if (callTimer) {
+      callTimer.textContent = '00:00';
+    }
+  }
+
+  function resetCallState() {
+    stopCallTimer();
+    if (state.call.localStream) {
+      state.call.localStream.getTracks().forEach(track => track.stop());
+    }
+    if (state.call.pc) {
+      state.call.pc.onicecandidate = null;
+      state.call.pc.ontrack = null;
+      state.call.pc.onconnectionstatechange = null;
+      state.call.pc.oniceconnectionstatechange = null;
+      state.call.pc.close();
+    }
+    state.call.pc = null;
+    if (remoteAudio) {
+      remoteAudio.srcObject = null;
+    }
+    state.call.session = null;
+    state.call.pendingCandidates = [];
+    state.call.pendingOffer = null;
+    state.call.pendingAccept = false;
+    state.call.pendingCancel = false;
+    state.call.localStream = null;
+    state.call.remoteStream = null;
+    state.call.restarting = false;
+    state.call.muted = false;
+    state.call.sinkId = null;
+    state.call.outputDevices = [];
+  }
+
+  function finalizeCall(status) {
+    if (!state.call.session) return;
+    setCallStatus(status);
+    stopCallTimer();
+    setTimeout(() => {
+      hideCallOverlay();
+      resetCallState();
+    }, 1200);
+  }
+
+  async function fetchCallToken() {
+    const res = await apiFetch('/api/calls/token', { method: 'POST', body: {} });
+    if (!res.data.ok) {
+      throw new Error(res.data.error || 'خطا در دریافت توکن تماس');
+    }
+    return res.data.data.token;
+  }
+
+  function waitForSignalingReady(timeoutMs = 6000) {
+    return new Promise((resolve) => {
+      if (state.call.wsConnected) return resolve(true);
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (state.call.wsConnected) {
+          clearInterval(timer);
+          resolve(true);
+          return;
+        }
+        if (Date.now() - started > timeoutMs) {
+          clearInterval(timer);
+          resolve(false);
+        }
+      }, 100);
+    });
+  }
+
+  async function connectSignaling() {
+    if (state.call.wsConnecting || state.call.wsConnected || !callConfig.signalingUrl || !state.token) return;
+    state.call.wsConnecting = true;
+    try {
+      const token = await fetchCallToken();
+      const ws = new WebSocket(callConfig.signalingUrl);
+      state.call.ws = ws;
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({ type: 'join', token }));
+      });
+      ws.addEventListener('message', handleSignalingMessage);
+      ws.addEventListener('close', handleSignalingClose);
+      ws.addEventListener('error', () => {});
+    } catch (err) {
+      // Silent connect failure; UI will show when call is attempted
+    } finally {
+      state.call.wsConnecting = false;
+    }
+  }
+
+  async function ensureSignalingConnected() {
+    if (state.call.wsConnected && state.call.ws?.readyState === WebSocket.OPEN) return true;
+    await connectSignaling();
+    return await waitForSignalingReady();
+  }
+
+  function signalingSend(type, payload) {
+    const ws = state.call.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ type, ...payload }));
+    return true;
+  }
+
+  function handleSignalingClose() {
+    state.call.wsConnected = false;
+    if (state.call.session) {
+      finalizeCall('failed');
+    }
+    if (!state.call.reconnectTimer && state.token) {
+      state.call.reconnectTimer = setTimeout(() => {
+        state.call.reconnectTimer = null;
+        connectSignaling();
+      }, 2000);
+    }
+  }
+
+  function handleSignalingMessage(event) {
+    let msg = null;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (err) {
+      return;
+    }
+    if (!msg || !msg.type) return;
+    if (msg.type === 'join_ok') {
+      state.call.wsConnected = true;
+      return;
+    }
+    switch (msg.type) {
+      case 'incoming_call':
+        handleIncomingCall(msg);
+        break;
+      case 'call_ringing':
+        handleCallRinging(msg);
+        break;
+      case 'call_offer':
+        handleCallOffer(msg);
+        break;
+      case 'call_answer':
+        handleCallAnswer(msg);
+        break;
+      case 'ice_candidate':
+        handleIceCandidate(msg);
+        break;
+      case 'call_busy':
+        handleRemoteEnd(msg, 'busy');
+        break;
+      case 'call_declined':
+        handleRemoteEnd(msg, 'declined');
+        break;
+      case 'call_missed':
+        handleRemoteEnd(msg, 'missed');
+        break;
+      case 'call_canceled':
+        handleRemoteEnd(msg, 'canceled');
+        break;
+      case 'call_end':
+        handleRemoteEnd(msg, msg.reason === 'completed' ? 'ended' : (msg.reason || 'ended'));
+        break;
+      case 'call_failed':
+        handleRemoteEnd(msg, 'failed');
+        break;
+      default:
+        break;
+    }
+  }
+
+  function handleRemoteEnd(msg, status) {
+    if (!state.call.session) return;
+    if (msg.call_id && state.call.session.callId && state.call.session.callId !== msg.call_id) return;
+    finalizeCall(status);
+  }
+
+  function handleCallRinging(msg) {
+    if (!state.call.session || state.call.session.callId) return;
+    state.call.session.callId = msg.call_id;
+    flushPendingCandidates();
+    if (state.call.pendingCancel) {
+      signalingSend('call_cancel', { call_id: msg.call_id });
+      state.call.pendingCancel = false;
+      finalizeCall('canceled');
+      return;
+    }
+    setCallStatus('ringing');
+  }
+
+  function handleIncomingCall(msg) {
+    if (state.call.session) return;
+    const peer = {
+      id: msg.from_user_id,
+      full_name: msg.caller_name,
+      username: msg.caller_username,
+      photo_id: msg.caller_photo_id
+    };
+    state.call.session = {
+      callId: msg.call_id,
+      conversationId: msg.conversation_id,
+      peer,
+      direction: 'incoming',
+      status: 'incoming',
+      isCaller: false,
+      accepted: false
+    };
+    setCallPeer(peer);
+    showCallOverlay();
+    setCallStatus('incoming');
+    stopCallTimer();
+  }
+
+  async function handleCallOffer(msg) {
+    if (!state.call.session) {
+      const peer = {
+        id: msg.from_user_id,
+        full_name: msg.caller_name,
+        username: msg.caller_username,
+        photo_id: msg.caller_photo_id
+      };
+      state.call.session = {
+        callId: msg.call_id,
+        conversationId: msg.conversation_id,
+        peer,
+        direction: 'incoming',
+        status: 'incoming',
+        isCaller: false,
+        accepted: false
+      };
+      setCallPeer(peer);
+      showCallOverlay();
+      setCallStatus('incoming');
+    }
+    if (!state.call.session || state.call.session.callId !== msg.call_id) return;
+    state.call.pendingOffer = msg.sdp;
+    if (state.call.session.direction === 'incoming' && (state.call.session.accepted || state.call.pendingAccept)) {
+      await acceptIncomingOffer();
+    }
+  }
+
+  async function handleCallAnswer(msg) {
+    if (!state.call.session || state.call.session.callId !== msg.call_id) return;
+    if (!state.call.pc) return;
+    try {
+      await state.call.pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      setCallStatus('connecting');
+    } catch (err) {
+      finalizeCall('failed');
+    }
+  }
+
+  async function handleIceCandidate(msg) {
+    if (!state.call.session || state.call.session.callId !== msg.call_id) return;
+    if (!state.call.pc || !msg.candidate) return;
+    try {
+      await state.call.pc.addIceCandidate(msg.candidate);
+    } catch (err) {
+      // Ignore
+    }
+  }
+
+  function flushPendingCandidates() {
+    if (!state.call.session?.callId || state.call.pendingCandidates.length === 0) return;
+    const callId = state.call.session.callId;
+    state.call.pendingCandidates.forEach((candidate) => {
+      signalingSend('ice_candidate', { call_id: callId, candidate });
+    });
+    state.call.pendingCandidates = [];
+  }
+
+  async function getLocalStream() {
+    if (state.call.localStream) return state.call.localStream;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('browser_not_supported');
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    state.call.localStream = stream;
+    return stream;
+  }
+
+  function attachRemoteStream(stream) {
+    state.call.remoteStream = stream;
+    if (remoteAudio) {
+      remoteAudio.srcObject = stream;
+      remoteAudio.play().catch(() => {});
+    }
+  }
+
+  function createPeerConnection(isCaller) {
+    const pc = new RTCPeerConnection({ iceServers: callConfig.iceServers });
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        if (!state.call.session?.callId) {
+          state.call.pendingCandidates.push(event.candidate);
+        } else {
+          signalingSend('ice_candidate', { call_id: state.call.session.callId, candidate: event.candidate });
+        }
+      }
+    };
+    pc.ontrack = (event) => {
+      const stream = event.streams && event.streams[0] ? event.streams[0] : null;
+      if (stream) {
+        attachRemoteStream(stream);
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (!state.call.session) return;
+      if (pc.connectionState === 'connected') {
+        state.call.restarting = false;
+        setCallStatus('connected');
+        startCallTimer();
+      }
+      if (pc.connectionState === 'failed' && state.call.session.status !== 'failed') {
+        setCallStatus('failed');
+        finalizeCall('failed');
+      }
+    };
+    pc.oniceconnectionstatechange = async () => {
+      if (!state.call.session) return;
+      const iceState = pc.iceConnectionState;
+      if (iceState === 'connected' || iceState === 'completed') {
+        state.call.restarting = false;
+        setCallStatus('connected');
+        startCallTimer();
+      }
+      if ((iceState === 'disconnected' || iceState === 'failed') && state.call.session.status === 'connected') {
+        setCallStatus('reconnecting');
+        if (isCaller && !state.call.restarting) {
+          state.call.restarting = true;
+          try {
+            const offer = await pc.createOffer({ iceRestart: true });
+            await pc.setLocalDescription(offer);
+            signalingSend('call_offer', { call_id: state.call.session.callId, sdp: offer, ice_restart: true });
+          } catch (err) {
+            finalizeCall('failed');
+          }
+        }
+      }
+    };
+    return pc;
+  }
+
+  async function startOutgoingCall() {
+    if (!state.currentConversation || isGroupChat()) return;
+    if (state.call.session) {
+      alert('در حال تماس هستید.');
+      return;
+    }
+    if (!callConfig.signalingUrl) {
+      alert('سیگنالینگ تماس تنظیم نشده است.');
+      return;
+    }
+    const ready = await ensureSignalingConnected();
+    if (!ready) {
+      alert('اتصال به سرور تماس ممکن نیست.');
+      return;
+    }
+
+    const peer = {
+      id: state.currentConversation.other_id,
+      full_name: state.currentConversation.other_name,
+      username: state.currentConversation.other_username,
+      photo_id: state.currentConversation.other_photo
+    };
+    state.call.session = {
+      callId: null,
+      conversationId: state.currentConversation.id,
+      peer,
+      direction: 'outgoing',
+      status: 'calling',
+      isCaller: true,
+      accepted: false
+    };
+    setCallPeer(peer);
+    showCallOverlay();
+    setCallStatus('calling');
+    stopCallTimer();
+
+    try {
+      const stream = await getLocalStream();
+      const pc = createPeerConnection(true);
+      state.call.pc = pc;
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      const offer = await pc.createOffer({ offerToReceiveAudio: true });
+      await pc.setLocalDescription(offer);
+      signalingSend('call_start', {
+        conversation_id: state.currentConversation.id,
+        to_user_id: peer.id,
+        sdp: offer
+      });
+    } catch (err) {
+      finalizeCall('failed');
+      if (err && err.name === 'NotAllowedError') {
+        alert('دسترسی به میکروفون رد شد.');
+      } else {
+        alert('خطا در شروع تماس.');
+      }
+    }
+  }
+
+  async function acceptIncomingOffer() {
+    if (!state.call.session || !state.call.pendingOffer) return;
+    state.call.pendingAccept = false;
+    try {
+      const stream = await getLocalStream();
+      let pc = state.call.pc;
+      if (!pc) {
+        pc = createPeerConnection(false);
+        state.call.pc = pc;
+      }
+      if (pc.getSenders && pc.getSenders().length === 0) {
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      }
+      await pc.setRemoteDescription(new RTCSessionDescription(state.call.pendingOffer));
+      state.call.pendingOffer = null;
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      signalingSend('call_answer', { call_id: state.call.session.callId, sdp: answer });
+      setCallStatus('connecting');
+    } catch (err) {
+      finalizeCall('failed');
+      if (err && err.name === 'NotAllowedError') {
+        alert('دسترسی به میکروفون رد شد.');
+      }
+    }
+  }
+
+  async function acceptIncomingCall() {
+    if (!state.call.session || state.call.session.direction !== 'incoming') return;
+    state.call.session.accepted = true;
+    setCallStatus('connecting');
+    if (!state.call.pendingOffer) {
+      state.call.pendingAccept = true;
+      return;
+    }
+    await acceptIncomingOffer();
+  }
+
+  function declineIncomingCall() {
+    if (!state.call.session || state.call.session.direction !== 'incoming') return;
+    if (state.call.session.callId) {
+      signalingSend('call_decline', { call_id: state.call.session.callId });
+    }
+    finalizeCall('declined');
+  }
+
+  function hangupCall() {
+    if (!state.call.session) return;
+    const status = state.call.session.status;
+    if (state.call.session.callId) {
+      const reason = status === 'connected' ? 'completed' : 'canceled';
+      signalingSend('call_end', { call_id: state.call.session.callId, reason });
+    } else {
+      state.call.pendingCancel = true;
+    }
+    finalizeCall(status === 'connected' ? 'ended' : 'canceled');
+  }
+
+  function toggleMute() {
+    if (!state.call.localStream) return;
+    state.call.muted = !state.call.muted;
+    state.call.localStream.getAudioTracks().forEach(track => {
+      track.enabled = !state.call.muted;
+    });
+    updateCallControls();
+  }
+
+  async function loadOutputDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const outputs = devices.filter(d => d.kind === 'audiooutput');
+    state.call.outputDevices = outputs;
+    return outputs;
+  }
+
+  async function toggleSpeaker() {
+    if (!remoteAudio || typeof remoteAudio.setSinkId !== 'function') return;
+    const outputs = state.call.outputDevices.length ? state.call.outputDevices : await loadOutputDevices();
+    if (!outputs || outputs.length === 0) return;
+    const currentId = state.call.sinkId || outputs[0].deviceId;
+    let next = outputs.find(d => d.deviceId !== currentId) || outputs[0];
+    try {
+      await remoteAudio.setSinkId(next.deviceId);
+      state.call.sinkId = next.deviceId;
+    } catch (err) {
+      // Ignore
+    }
   }
 
   function buildReactionBar(messageId, currentReaction) {
@@ -339,6 +964,16 @@
     const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
   });
+
+  audioCallBtn?.addEventListener('click', startOutgoingCall);
+  callAcceptBtn?.addEventListener('click', acceptIncomingCall);
+  callDeclineBtn?.addEventListener('click', declineIncomingCall);
+  callHangupBtn?.addEventListener('click', hangupCall);
+  callMuteBtn?.addEventListener('click', toggleMute);
+  callSpeakerBtn?.addEventListener('click', toggleSpeaker);
+  if (callSpeakerBtn) {
+    callSpeakerBtn.disabled = !remoteAudio || typeof remoteAudio.setSinkId !== 'function';
+  }
 
   newGroupBtn?.addEventListener('click', () => {
     groupError.textContent = '';
@@ -784,6 +1419,7 @@
       chatUserAvatar.style.backgroundImage = '';
       chatUserAvatar.textContent = '';
       groupSettingsBtn.classList.add('hidden');
+      audioCallBtn?.classList.add('hidden');
       return;
     }
     if (conversation.chat_type === 'group') {
@@ -796,6 +1432,7 @@
       chatUserAvatar.style.backgroundImage = '';
       chatUserAvatar.textContent = '👥';
       groupSettingsBtn.classList.remove('hidden');
+      audioCallBtn?.classList.add('hidden');
       return;
     }
     chatUserName.textContent = conversation.other_name || conversation.other_username || '';
@@ -808,6 +1445,10 @@
       chatUserAvatar.textContent = '';
     }
     groupSettingsBtn.classList.add('hidden');
+    if (audioCallBtn) {
+      audioCallBtn.classList.remove('hidden');
+      audioCallBtn.disabled = !callConfig.signalingUrl;
+    }
   }
 
   function renderConversations() {
@@ -1595,6 +2236,7 @@
       state.me = meRes.data.data.user;
       showMain();
       initEmojiPicker();
+      connectSignaling();
       await loadConversations();
       await handleInviteLink();
       if (!state.currentConversation && state.conversations.length > 0) {

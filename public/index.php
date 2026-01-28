@@ -92,6 +92,7 @@ if (strpos($path, '/api/') === 0) {
                             <div id="chat-user-username" class="chat-user-username"></div>
                         </div>
                     </div>
+                    <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی">📞 تماس</button>
                     <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه">⚙️</button>
                 </div>
                 <div id="messages" class="messages"></div>
@@ -242,9 +243,40 @@ if (strpos($path, '/api/') === 0) {
         </div>
     </div>
 
+    <div id="call-overlay" class="call-overlay hidden">
+        <div class="call-card">
+            <div class="call-header">
+                <div id="call-avatar" class="avatar"></div>
+                <div class="call-meta">
+                    <div id="call-name" class="call-name">تماس</div>
+                    <div id="call-status" class="call-status"></div>
+                </div>
+            </div>
+            <div id="call-timer" class="call-timer">00:00</div>
+            <div class="call-actions">
+                <button id="call-decline-btn" class="call-btn decline">رد</button>
+                <button id="call-accept-btn" class="call-btn accept">پاسخ</button>
+                <button id="call-mute-btn" class="call-btn secondary">بی‌صدا</button>
+                <button id="call-speaker-btn" class="call-btn secondary">اسپیکر</button>
+                <button id="call-hangup-btn" class="call-btn hangup">قطع</button>
+            </div>
+        </div>
+        <audio id="remote-audio" autoplay playsinline></audio>
+    </div>
+
     <script>
         window.SELO_CONFIG = {
-            baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>'
+            baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>',
+            calls: <?php
+                $callConfig = $config['calls'] ?? [];
+                $iceServers = $callConfig['ice_servers'] ?? [['urls' => ['stun:stun.l.google.com:19302']]];
+                $callsPayload = [
+                    'signalingUrl' => $callConfig['signaling_url'] ?? '',
+                    'ringTimeoutSeconds' => (int)($callConfig['ring_timeout_seconds'] ?? 45),
+                    'iceServers' => $iceServers,
+                ];
+                echo json_encode($callsPayload, JSON_UNESCAPED_UNICODE);
+            ?>
         };
     </script>
     <script src="<?php echo $basePath; ?>/assets/emoji-picker.js"></script>

@@ -75,3 +75,13 @@ Installer steps:
 - **Upload size exceeded** → raise PHP limits and `uploads.*` in config
 - **Emoji/reaction not saving** → ensure MySQL tables use **utf8mb4**
 - **JWT unauthorized** → check `app.jwt_secret`
+
+---
+
+## Voice Calling (WebRTC) — Important Notes
+- Voice calls are **audio‑only** and require **WebRTC** + a **signaling server** (WebSocket). Pure PHP/shared hosting alone is not enough.
+- Recommended: run the **Node.js signaling server** in `signaling/` (via cPanel Node App, VPS, or managed Node host).
+- If cPanel doesn’t support Node/WebSockets, you must host signaling separately and point `calls.signaling_url` to it.
+- Configure `calls.signaling_secret` (now in installer) and use the same value as `SIGNALING_SECRET` for the signaling server.
+- Default STUN is included; **TURN is required** for strict NAT/firewalls. Add TURN to `calls.ice_servers` in `config/config.php`.
+- HTTPS requires **wss://** for signaling.
