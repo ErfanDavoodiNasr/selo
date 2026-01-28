@@ -69,6 +69,27 @@ Installer steps:
 
 ---
 
+## Logging (App + Error)
+- Config: `logging.level` (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+  - Enable debug logs: set `logging.level` to **DEBUG**
+  - Reduce noise: set it to **ERROR** or **CRITICAL**
+- Log files:
+  - App: `storage/logs/app.log`
+  - Errors: `storage/logs/error.log`
+- Rotation:
+  - `logging.max_size_mb` (default 10MB)
+  - `logging.max_files` (default 5)
+- Permissions (cPanel):
+  - `storage/logs/` → **775** (use **777** only if required by hosting)
+
+Example lines:
+```
+[2026-01-28 18:42:11] LEVEL=INFO CHANNEL=api RID=3f9c2a1a UID=123 IP=1.2.3.4 METHOD=POST PATH=/api/login STATUS=200 DUR_MS=32 MSG="request_end" CTX="-"
+[2026-01-28 18:42:12] LEVEL=ERROR CHANNEL=error RID=3f9c2a1a UID=123 IP=1.2.3.4 METHOD=POST PATH=/api/login STATUS=500 DUR_MS=40 MSG="Database error" CTX="ex=RuntimeException at=Database.php:91 trace=PDO->prepare>AuthController->login"
+```
+
+---
+
 ## Troubleshooting (Quick)
 - **500 error / white page** → wrong PHP version or permissions → set `storage/` to `775`
 - **Upload failed** → make `storage/uploads/` writable

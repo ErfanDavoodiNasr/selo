@@ -82,6 +82,13 @@ $defaultCalls = [
         ['urls' => ['stun:stun.l.google.com:19302']],
     ],
 ];
+$defaultLogging = [
+    'level' => 'INFO',
+    'app_file' => $basePath . '/storage/logs/app.log',
+    'error_file' => $basePath . '/storage/logs/error.log',
+    'max_size_mb' => 10,
+    'max_files' => 5,
+];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrf()) {
@@ -234,6 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'db' => $db,
                     'uploads' => $uploads,
                     'calls' => $calls,
+                    'logging' => $defaultLogging,
                 ];
 
                 $export = "<?php\nreturn " . var_export($config, true) . ";\n";

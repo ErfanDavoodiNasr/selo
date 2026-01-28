@@ -17,7 +17,10 @@ $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/')
 if ($basePath === '/') {
     $basePath = '';
 }
-if (strpos($path, '/api/') === 0) {
+$apiPrefix = $basePath !== '' ? ($basePath . '/api/') : '/api/';
+if (strpos($path, $apiPrefix) === 0) {
+    App\Core\LogContext::setIsApi(true);
+    App\Core\Logger::info('request_start', [], 'api');
     require __DIR__ . '/../app/routes.php';
     exit;
 }

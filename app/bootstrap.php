@@ -30,6 +30,10 @@ spl_autoload_register(function ($class) {
     }
 });
 
+App\Core\LogContext::initFromGlobals(false);
+App\Core\Logger::init($config ?? []);
+App\Core\Logger::installErrorHandlers();
+
 if ($config) {
     App\Core\Database::init($config);
 }

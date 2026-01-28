@@ -39,4 +39,11 @@ return [
             ['urls' => ['stun:stun.l.google.com:19302']],
         ],
     ],
+    'logging' => [
+        'level' => 'INFO',
+        'app_file' => __DIR__ . '/../storage/logs/app.log',
+        'error_file' => __DIR__ . '/../storage/logs/error.log',
+        'max_size_mb' => 10,
+        'max_files' => 5,
+    ],
 ];

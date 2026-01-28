@@ -38,6 +38,9 @@ class Auth
         $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, allow_voice_calls FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
         $stmt->execute([$payload['sub']]);
         $user = $stmt->fetch();
+        if ($user) {
+            LogContext::setUserId((int)$user['id']);
+        }
         self::$user = $user ?: null;
         return self::$user;
     }
