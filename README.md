@@ -82,12 +82,6 @@ Installer steps:
 - Permissions (cPanel):
   - `storage/logs/` → **775** (use **777** only if required by hosting)
 
-Example lines:
-```
-[2026-01-28 18:42:11] LEVEL=INFO CHANNEL=api RID=3f9c2a1a UID=123 IP=1.2.3.4 METHOD=POST PATH=/api/login STATUS=200 DUR_MS=32 MSG="request_end" CTX="-"
-[2026-01-28 18:42:12] LEVEL=ERROR CHANNEL=error RID=3f9c2a1a UID=123 IP=1.2.3.4 METHOD=POST PATH=/api/login STATUS=500 DUR_MS=40 MSG="Database error" CTX="ex=RuntimeException at=Database.php:91 trace=PDO->prepare>AuthController->login"
-```
-
 ---
 
 ## Troubleshooting (Quick)
