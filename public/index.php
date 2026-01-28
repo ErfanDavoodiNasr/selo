@@ -29,6 +29,7 @@ if (strpos($path, '/api/') === 0) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SELO (سلو)</title>
     <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/style.css">
+    <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/call.css">
 </head>
 <body data-theme="light">
     <div id="app">
@@ -243,26 +244,7 @@ if (strpos($path, '/api/') === 0) {
         </div>
     </div>
 
-    <div id="call-overlay" class="call-overlay hidden">
-        <div class="call-card">
-            <div class="call-header">
-                <div id="call-avatar" class="avatar"></div>
-                <div class="call-meta">
-                    <div id="call-name" class="call-name">تماس</div>
-                    <div id="call-status" class="call-status"></div>
-                </div>
-            </div>
-            <div id="call-timer" class="call-timer">00:00</div>
-            <div class="call-actions">
-                <button id="call-decline-btn" class="call-btn decline">رد</button>
-                <button id="call-accept-btn" class="call-btn accept">پاسخ</button>
-                <button id="call-mute-btn" class="call-btn secondary">بی‌صدا</button>
-                <button id="call-speaker-btn" class="call-btn secondary">اسپیکر</button>
-                <button id="call-hangup-btn" class="call-btn hangup">قطع</button>
-            </div>
-        </div>
-        <audio id="remote-audio" autoplay playsinline></audio>
-    </div>
+    <?php include __DIR__ . '/templates/partials/call-overlay.html'; ?>
 
     <script>
         window.SELO_CONFIG = {
@@ -280,6 +262,7 @@ if (strpos($path, '/api/') === 0) {
         };
     </script>
     <script src="<?php echo $basePath; ?>/assets/emoji-picker.js"></script>
+    <script src="<?php echo $basePath; ?>/assets/js/call-ui.js"></script>
     <script src="<?php echo $basePath; ?>/assets/app.js"></script>
 </body>
 </html>

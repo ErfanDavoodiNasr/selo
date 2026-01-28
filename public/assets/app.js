@@ -232,6 +232,10 @@
 
   function setCallPeer(peer) {
     if (!peer) return;
+    if (window.CallUI && typeof window.CallUI.setPeer === 'function') {
+      window.CallUI.setPeer(peer);
+      return;
+    }
     if (callName) {
       callName.textContent = peer.full_name || peer.username || 'تماس';
     }
@@ -247,16 +251,31 @@
   }
 
   function showCallOverlay() {
+    if (window.CallUI && typeof window.CallUI.open === 'function') {
+      window.CallUI.open();
+      return;
+    }
     callOverlay?.classList.remove('hidden');
+    callOverlay?.classList.add('is-visible');
   }
 
   function hideCallOverlay() {
+    if (window.CallUI && typeof window.CallUI.close === 'function') {
+      window.CallUI.close();
+      return;
+    }
     callOverlay?.classList.add('hidden');
+    callOverlay?.classList.remove('is-visible');
   }
 
   function setCallStatus(status) {
     if (state.call.session) {
       state.call.session.status = status;
+    }
+    if (window.CallUI && typeof window.CallUI.setState === 'function') {
+      window.CallUI.setState(status);
+      updateCallControls();
+      return;
     }
     if (callStatus) {
       callStatus.textContent = callStatusLabels[status] || '';
@@ -265,6 +284,13 @@
   }
 
   function updateCallControls() {
+    if (window.CallUI && typeof window.CallUI.setMuted === 'function') {
+      window.CallUI.setMuted(state.call.muted);
+      if (typeof window.CallUI.setSpeaker === 'function') {
+        window.CallUI.setSpeaker(!!state.call.sinkId);
+      }
+      return;
+    }
     if (!state.call.session) return;
     const status = state.call.session.status || '';
     const isIncoming = state.call.session.direction === 'incoming' && !state.call.session.accepted;
@@ -287,6 +313,11 @@
   }
 
   function startCallTimer() {
+    if (window.CallUI && typeof window.CallUI.startTimer === 'function') {
+      state.call.callStartAt = Date.now();
+      window.CallUI.startTimer(state.call.callStartAt);
+      return;
+    }
     if (state.call.callTimerId) return;
     state.call.callStartAt = Date.now();
     if (callTimer) {
@@ -301,6 +332,10 @@
   }
 
   function stopCallTimer() {
+    if (window.CallUI && typeof window.CallUI.stopTimer === 'function') {
+      window.CallUI.stopTimer();
+      return;
+    }
     if (state.call.callTimerId) {
       clearInterval(state.call.callTimerId);
       state.call.callTimerId = null;
@@ -766,6 +801,9 @@
     state.call.localStream.getAudioTracks().forEach(track => {
       track.enabled = !state.call.muted;
     });
+    if (window.CallUI && typeof window.CallUI.setMuted === 'function') {
+      window.CallUI.setMuted(state.call.muted);
+    }
     updateCallControls();
   }
 
@@ -786,6 +824,9 @@
     try {
       await remoteAudio.setSinkId(next.deviceId);
       state.call.sinkId = next.deviceId;
+      if (window.CallUI && typeof window.CallUI.setSpeaker === 'function') {
+        window.CallUI.setSpeaker(true);
+      }
     } catch (err) {
       // Ignore
     }
@@ -966,11 +1007,26 @@
   });
 
   audioCallBtn?.addEventListener('click', startOutgoingCall);
-  callAcceptBtn?.addEventListener('click', acceptIncomingCall);
-  callDeclineBtn?.addEventListener('click', declineIncomingCall);
-  callHangupBtn?.addEventListener('click', hangupCall);
-  callMuteBtn?.addEventListener('click', toggleMute);
-  callSpeakerBtn?.addEventListener('click', toggleSpeaker);
+  if (window.CallUI && typeof window.CallUI.on === 'function') {
+    window.CallUI.on('accept', acceptIncomingCall);
+    window.CallUI.on('decline', declineIncomingCall);
+    window.CallUI.on('hangup', hangupCall);
+    window.CallUI.on('mute', toggleMute);
+    window.CallUI.on('speaker', toggleSpeaker);
+    window.CallUI.on('close', () => {
+      if (state.call.session?.direction === 'incoming' && !state.call.session?.accepted) {
+        declineIncomingCall();
+      } else if (state.call.session) {
+        hangupCall();
+      }
+    });
+  } else {
+    callAcceptBtn?.addEventListener('click', acceptIncomingCall);
+    callDeclineBtn?.addEventListener('click', declineIncomingCall);
+    callHangupBtn?.addEventListener('click', hangupCall);
+    callMuteBtn?.addEventListener('click', toggleMute);
+    callSpeakerBtn?.addEventListener('click', toggleSpeaker);
+  }
   if (callSpeakerBtn) {
     callSpeakerBtn.disabled = !remoteAudio || typeof remoteAudio.setSinkId !== 'function';
   }
