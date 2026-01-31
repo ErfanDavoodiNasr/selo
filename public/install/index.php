@@ -3,10 +3,14 @@ session_start();
 
 $basePath = dirname(__DIR__, 2);
 $configFile = $basePath . '/config/config.php';
+$installBase = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
+$installBaseUrl = $installBase === '' ? '/install' : $installBase;
+$appBasePath = rtrim(str_replace('/install', '', $installBase), '/');
+$appBasePath = $appBasePath === '' ? '/' : $appBasePath;
 if (file_exists($configFile)) {
     $config = require $configFile;
     if (!empty($config['installed'])) {
-        header('Location: /');
+        header('Location: ' . $appBasePath);
         exit;
     }
 }
@@ -127,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'pass' => $dbPass,
                     'prefix' => $dbPrefix,
                 ];
-                header('Location: /install/?step=3');
+                header('Location: ' . $installBaseUrl . '/?step=3');
                 exit;
             } catch (Exception $e) {
                 $errors[] = 'اتصال یا ایجاد جداول ناموفق بود: ' . $e->getMessage();
@@ -183,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if (empty($errors)) {
-                    header('Location: /install/?step=4');
+                    header('Location: ' . $installBaseUrl . '/?step=4');
                     exit;
                 }
             }
@@ -250,7 +254,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 file_put_contents($configFile, $export);
                 $_SESSION['install_done'] = true;
-                header('Location: /install/?step=finish');
+                header('Location: ' . $installBaseUrl . '/?step=finish');
                 exit;
             }
         }
@@ -363,7 +367,7 @@ $step4Values = [
                     <li><?php echo $path . ': ' . ($ok ? '✅' : '❌'); ?></li>
                 <?php endforeach; ?>
             </ul>
-            <a href="/install/?step=2"><button>ادامه</button></a>
+            <a href="<?php echo htmlspecialchars($installBaseUrl . '/?step=2', ENT_QUOTES, 'UTF-8'); ?>"><button>ادامه</button></a>
 
         <?php elseif ($stepView === '2'): ?>
             <h3>اطلاعات پایگاه داده</h3>
