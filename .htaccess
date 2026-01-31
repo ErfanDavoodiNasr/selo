@@ -1,0 +1,16 @@
+RewriteEngine On
+RewriteBase /
+
+# Block access to sensitive directories
+RewriteRule ^(config|storage|app|database|signaling)(/|$) - [F]
+
+# Serve public assets directly from /public
+RewriteRule ^assets/(.*)$ public/assets/$1 [L,NC]
+
+# Allow existing files/directories (e.g. /install, /photo.php)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Route all other requests to the root front controller
+RewriteRule ^ index.php [L]

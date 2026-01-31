@@ -27,7 +27,8 @@ SELO is a Telegram‑like messenger for shared hosting. It supports private chat
 
 **Document root**
 - Best: point domain to `/public`
-- If not possible: copy **contents of `public/`** into `public_html/` and keep the rest outside web root if you can
+- Simple deploy (no moving files): extract into `public_html` and open `/install` (requires `.htaccess` / mod_rewrite)
+- If `.htaccess` is disabled: copy **contents of `public/`** into `public_html/` and keep the rest outside web root if you can
 
 ### 4) Set permissions
 - Folders: **755**
