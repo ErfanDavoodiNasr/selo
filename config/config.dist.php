@@ -24,11 +24,22 @@ return [
         'video_max_size' => 25 * 1024 * 1024,
         'voice_max_size' => 10 * 1024 * 1024,
         'file_max_size' => 20 * 1024 * 1024,
+        'max_files_per_request' => 10,
+        'max_photos_per_request' => 10,
+        'max_videos_per_request' => 10,
+        'thumbnail_max_size' => 480,
+        'ffmpeg_path' => '',
+        'ffprobe_path' => '',
+    ],
+    'realtime' => [
+        'sse_retry_ms' => 2000,
+        'sse_heartbeat_seconds' => 20,
+        'sse_max_seconds' => 55,
     ],
     'calls' => [
         'signaling_url' => 'ws://localhost:3001/ws',
         'signaling_secret' => 'CHANGE_ME',
-        'token_ttl_seconds' => 120,
+        'token_ttl_seconds' => 604800,
         'ring_timeout_seconds' => 45,
         'rate_limit' => [
             'max_attempts' => 6,
