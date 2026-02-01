@@ -20,15 +20,19 @@ body.call-open {
 }
 
 .audio-call-btn {
-  font-size: 14px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  background: var(--blue);
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  border-radius: var(--radius-2);
+  background: var(--accent);
   color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .audio-call-btn:hover {
-  background: var(--blue-dark);
+  background: var(--accent-strong);
 }
 
 .audio-call-btn:disabled {

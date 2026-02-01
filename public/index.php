@@ -1,14 +1,32 @@
 <?php
 require __DIR__ . '/../app/bootstrap.php';
 
+function installerUrl(): string
+{
+    $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+    $basePath = rtrim(dirname($scriptName), '/');
+    if ($basePath === '/') {
+        $basePath = '';
+    }
+    $docRoot = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    if ($docRoot !== '') {
+        $basePathDisk = $docRoot . ($basePath === '' ? '' : $basePath);
+        $installFile = $basePathDisk . '/install.php';
+        if (is_file($installFile)) {
+            return ($basePath === '' ? '' : $basePath) . '/install.php';
+        }
+    }
+    return ($basePath === '' ? '' : $basePath) . '/install/';
+}
+
 $configFile = __DIR__ . '/../config/config.php';
 if (!file_exists($configFile)) {
-    header('Location: /install/');
+    header('Location: ' . installerUrl());
     exit;
 }
 $config = require $configFile;
 if (empty($config['installed'])) {
-    header('Location: /install/');
+    header('Location: ' . installerUrl());
     exit;
 }
 
@@ -17,10 +35,18 @@ $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/')
 if ($basePath === '/') {
     $basePath = '';
 }
+$relativePath = $path;
+if ($basePath !== '' && strpos($relativePath, $basePath . '/') === 0) {
+    $relativePath = substr($relativePath, strlen($basePath));
+}
+if ($relativePath === '') {
+    $relativePath = '/';
+}
 $apiPrefix = $basePath !== '' ? ($basePath . '/api/') : '/api/';
 if (strpos($path, $apiPrefix) === 0) {
     App\Core\LogContext::setIsApi(true);
     App\Core\Logger::info('request_start', [], 'api');
+    $path = $relativePath;
     require __DIR__ . '/../app/routes.php';
     exit;
 }
@@ -31,6 +57,9 @@ if (strpos($path, $apiPrefix) === 0) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SELO (سلو)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/style.css">
     <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/call.css">
 </head>
@@ -38,7 +67,7 @@ if (strpos($path, $apiPrefix) === 0) {
     <div id="app">
         <div id="auth-view" class="auth-view">
             <div class="auth-card">
-                <div class="brand">
+                <div class="auth-brand">
                     <div class="brand-title">SELO</div>
                     <div class="brand-subtitle">سلو</div>
                 </div>
@@ -75,30 +104,49 @@ if (strpos($path, $apiPrefix) === 0) {
                 <div class="sidebar-header">
                     <div class="brand-mini">SELO</div>
                     <div class="sidebar-actions">
-                        <button id="new-group-btn" class="icon-btn" title="گروه جدید">👥+</button>
-                        <button id="user-settings-btn" class="icon-btn" title="تنظیمات حساب">⚙️</button>
-                        <button id="theme-toggle" class="icon-btn" title="تغییر تم">🌓</button>
+                        <button id="new-group-btn" class="icon-btn" title="گروه جدید">
+                            <span class="material-symbols-rounded">group_add</span>
+                        </button>
+                        <button id="user-settings-btn" class="icon-btn" title="تنظیمات حساب">
+                            <span class="material-symbols-rounded">settings</span>
+                        </button>
+                        <button id="theme-toggle" class="icon-btn" title="تغییر تم">
+                            <span class="material-symbols-rounded">dark_mode</span>
+                        </button>
                     </div>
                 </div>
                 <div class="sidebar-search">
+                    <span class="material-symbols-rounded">search</span>
                     <input id="user-search" type="text" placeholder="جستجوی نام کاربری...">
                     <div id="search-results" class="search-results"></div>
                 </div>
                 <div id="chat-list" class="chat-list"></div>
             </aside>
 
-            <section class="chat">
+            <section class="chat-panel">
                 <div class="chat-header">
-                    <button id="back-to-chats" class="icon-btn mobile-only">بازگشت</button>
+                    <button id="back-to-chats" class="icon-btn mobile-only" title="بازگشت">
+                        <span class="material-symbols-rounded">arrow_forward</span>
+                    </button>
                     <div class="chat-user">
                         <div id="chat-user-avatar" class="avatar"></div>
-                        <div>
+                        <div class="chat-user-meta">
                             <div id="chat-user-name" class="chat-user-name">گفتگو</div>
                             <div id="chat-user-username" class="chat-user-username"></div>
+                            <div id="chat-user-status" class="chat-user-status"></div>
                         </div>
                     </div>
-                    <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی">📞 تماس</button>
-                    <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه">⚙️</button>
+                    <div class="chat-header-actions">
+                        <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی">
+                            <span class="material-symbols-rounded">call</span>
+                        </button>
+                        <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه">
+                            <span class="material-symbols-rounded">tune</span>
+                        </button>
+                        <button id="info-toggle" class="icon-btn" title="اطلاعات گفتگو">
+                            <span class="material-symbols-rounded">info</span>
+                        </button>
+                    </div>
                 </div>
                 <div id="messages" class="messages"></div>
                 <div id="attachment-preview" class="attachment-preview hidden"></div>
@@ -121,24 +169,62 @@ if (strpos($path, $apiPrefix) === 0) {
                     <button id="reply-cancel" class="icon-btn">×</button>
                 </div>
                 <div class="composer">
-                    <button id="attach-btn" class="icon-btn" title="پیوست">📎</button>
+                    <button id="attach-btn" class="icon-btn" title="پیوست">
+                        <span class="material-symbols-rounded">attach_file</span>
+                    </button>
                     <div id="attach-menu" class="attach-menu hidden">
                         <button type="button" data-type="photo">عکس</button>
                         <button type="button" data-type="video">ویدیو</button>
                         <button type="button" data-type="file">فایل</button>
                     </div>
-                    <button id="emoji-btn" class="icon-btn">😊</button>
+                    <button id="emoji-btn" class="icon-btn" title="ایموجی">
+                        <span class="material-symbols-rounded">sentiment_satisfied</span>
+                    </button>
                     <div class="composer-input">
                         <textarea id="message-input" rows="1" placeholder="پیام بنویسید..."></textarea>
                         <div id="emoji-picker" class="emoji-picker hidden"></div>
                     </div>
-                    <button id="voice-btn" class="icon-btn" title="پیام صوتی">🎤</button>
-                    <button id="send-btn" class="send-btn">ارسال</button>
+                    <button id="voice-btn" class="icon-btn" title="پیام صوتی">
+                        <span class="material-symbols-rounded">mic</span>
+                    </button>
+                    <button id="send-btn" class="send-btn" title="ارسال">
+                        <span class="material-symbols-rounded">send</span>
+                    </button>
                 </div>
-                <input id="photo-input" type="file" accept="image/*" class="hidden">
-                <input id="video-input" type="file" accept="video/*" class="hidden">
-                <input id="file-input" type="file" class="hidden">
+                <input id="photo-input" type="file" accept="image/*" multiple class="hidden">
+                <input id="video-input" type="file" accept="video/*" multiple class="hidden">
+                <input id="file-input" type="file" multiple class="hidden">
             </section>
+
+            <aside id="info-panel" class="info-panel hidden" aria-label="اطلاعات گفتگو">
+                <div class="info-header">
+                    <div class="info-title">اطلاعات گفتگو</div>
+                    <button id="info-close" class="icon-btn" title="بستن">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div class="info-body">
+                    <div class="info-hero">
+                        <div id="info-avatar" class="info-avatar">👤</div>
+                        <div class="info-text">
+                            <div id="info-title" class="info-name">-</div>
+                            <div id="info-subtitle" class="info-subtitle">-</div>
+                        </div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">وضعیت</div>
+                        <div id="info-status" class="info-value">-</div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">توضیحات</div>
+                        <div id="info-description" class="info-value muted">-</div>
+                    </div>
+                    <div class="info-section">
+                        <div class="info-label">اعضا</div>
+                        <div id="info-members" class="info-value">-</div>
+                    </div>
+                </div>
+            </aside>
         </div>
     </div>
 
@@ -232,12 +318,37 @@ if (strpos($path, $apiPrefix) === 0) {
     </div>
 
     <div id="user-settings-modal" class="modal hidden">
-        <div class="modal-card">
+        <div class="modal-card wide">
             <div class="modal-header">
                 <div class="modal-title">تنظیمات حساب</div>
                 <button id="user-settings-close" class="icon-btn">✖</button>
             </div>
             <div class="modal-body">
+                <div class="settings-section">
+                    <div class="section-title">پروفایل</div>
+                    <div class="profile-row">
+                        <div id="profile-avatar" class="profile-avatar">👤</div>
+                        <div class="profile-actions">
+                            <button id="profile-photo-change" class="send-btn small" type="button">تغییر عکس</button>
+                            <button id="profile-photo-remove" class="icon-btn" type="button" title="حذف عکس">🗑️</button>
+                            <input id="profile-photo-input" type="file" accept="image/*" class="hidden">
+                        </div>
+                    </div>
+                    <div class="profile-form">
+                        <label>نام کامل</label>
+                        <input id="profile-name" type="text" required>
+                        <label>نام کاربری</label>
+                        <input id="profile-username" type="text" required>
+                        <label>بیو</label>
+                        <textarea id="profile-bio" rows="2" placeholder="درباره شما..."></textarea>
+                        <label>ایمیل</label>
+                        <input id="profile-email" type="email" required>
+                        <label>شماره تماس</label>
+                        <input id="profile-phone" type="text" placeholder="+98 ...">
+                        <div id="profile-error" class="form-error"></div>
+                        <button id="profile-save" class="send-btn" type="button">ذخیره پروفایل</button>
+                    </div>
+                </div>
                 <div class="settings-section">
                     <div class="section-title">حریم خصوصی</div>
                     <div class="toggle-row">
