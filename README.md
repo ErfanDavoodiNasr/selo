@@ -46,8 +46,8 @@ SELO is a Telegram‑like messenger for shared hosting. It supports private chat
 - Keep: **DB name, user, password, host (usually localhost)**
 
 ### 6) Run installer
-- If installed in root: `https://yourdomain.com/install`
-- If in subfolder: `https://yourdomain.com/selo/install`
+- If installed in root: `https://yourdomain.com/install` (or `https://yourdomain.com/install.php` if `/install` is blocked)
+- If in subfolder: `https://yourdomain.com/selo/install` (or `https://yourdomain.com/selo/install.php` if `/install` is blocked)
 
 Installer steps:
 1. Requirements check

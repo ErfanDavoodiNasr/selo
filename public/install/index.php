@@ -3,10 +3,32 @@ session_start();
 
 $basePath = dirname(__DIR__, 2);
 $configFile = $basePath . '/config/config.php';
-$installBase = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-$installBaseUrl = $installBase === '' ? '/install' : $installBase;
-$appBasePath = rtrim(str_replace('/install', '', $installBase), '/');
+$scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+$scriptDir = rtrim(dirname($scriptName), '/');
+$scriptBase = basename($scriptName);
+$isIndexScript = strtolower($scriptBase) === 'index.php';
+if ($isIndexScript) {
+    $installBaseUrl = $scriptDir === '' ? '/install' : $scriptDir;
+    $appBasePath = rtrim(str_replace('/install', '', $scriptDir), '/');
+} else {
+    $installBaseUrl = $scriptName === '' ? '/install' : $scriptName;
+    $appBasePath = rtrim(str_replace('/' . $scriptBase, '', $scriptName), '/');
+}
 $appBasePath = $appBasePath === '' ? '/' : $appBasePath;
+$isInstallFile = (bool)preg_match('/\\.php$/i', $installBaseUrl);
+
+function installUrl(string $query = ''): string
+{
+    global $installBaseUrl, $isInstallFile;
+    if ($query === '') {
+        return $installBaseUrl;
+    }
+    $query = ltrim($query, '?');
+    if ($isInstallFile) {
+        return $installBaseUrl . '?' . $query;
+    }
+    return rtrim($installBaseUrl, '/') . '/?' . $query;
+}
 if (file_exists($configFile)) {
     $config = require $configFile;
     if (!empty($config['installed'])) {
@@ -36,8 +58,8 @@ function defaultAppUrl(): string
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $appUrl = $scheme . '://' . $host;
-    $baseDir = rtrim(str_replace('/install', '', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
-    if ($baseDir !== '') {
+    $baseDir = $GLOBALS['appBasePath'] ?? '/';
+    if ($baseDir !== '' && $baseDir !== '/') {
         $appUrl .= $baseDir;
     }
     return $appUrl;
@@ -131,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'pass' => $dbPass,
                     'prefix' => $dbPrefix,
                 ];
-                header('Location: ' . $installBaseUrl . '/?step=3');
+                header('Location: ' . installUrl('step=3'));
                 exit;
             } catch (Exception $e) {
                 $errors[] = 'اتصال یا ایجاد جداول ناموفق بود: ' . $e->getMessage();
@@ -187,7 +209,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if (empty($errors)) {
-                    header('Location: ' . $installBaseUrl . '/?step=4');
+                    header('Location: ' . installUrl('step=4'));
                     exit;
                 }
             }
@@ -254,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 file_put_contents($configFile, $export);
                 $_SESSION['install_done'] = true;
-                header('Location: ' . $installBaseUrl . '/?step=finish');
+                header('Location: ' . installUrl('step=finish'));
                 exit;
             }
         }
@@ -367,7 +389,7 @@ $step4Values = [
                     <li><?php echo $path . ': ' . ($ok ? '✅' : '❌'); ?></li>
                 <?php endforeach; ?>
             </ul>
-            <a href="<?php echo htmlspecialchars($installBaseUrl . '/?step=2', ENT_QUOTES, 'UTF-8'); ?>"><button>ادامه</button></a>
+            <a href="<?php echo htmlspecialchars(installUrl('step=2'), ENT_QUOTES, 'UTF-8'); ?>"><button>ادامه</button></a>
 
         <?php elseif ($stepView === '2'): ?>
             <h3>اطلاعات پایگاه داده</h3>
@@ -474,7 +496,7 @@ $step4Values = [
         <?php elseif ($stepView === 'finish'): ?>
             <h3>نصب کامل شد ✅</h3>
             <p>اکنون می‌توانید وارد شوید.</p>
-            <a href="/"><button>ورود به SELO</button></a>
+            <a href="<?php echo htmlspecialchars($appBasePath, ENT_QUOTES, 'UTF-8'); ?>"><button>ورود به SELO</button></a>
         <?php endif; ?>
     </div>
 </body>
