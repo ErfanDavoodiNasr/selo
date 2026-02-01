@@ -57,6 +57,7 @@ class AuthController
         $userId = $pdo->lastInsertId();
         $user = ['id' => (int)$userId, 'full_name' => $fullName, 'username' => $username, 'email' => $email];
         $token = Auth::issueToken($user, $config);
+        self::setAuthCookie($config, $token);
 
         Logger::info('register_success', ['user_id' => (int)$userId, 'username' => $username], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
@@ -92,7 +93,25 @@ class AuthController
 
         RateLimiter::clear($ip, $identifier, $config);
         $token = Auth::issueToken($user, $config);
+        self::setAuthCookie($config, $token);
         Logger::info('login_success', ['user_id' => (int)$user['id'], 'username' => $user['username']], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
+    }
+
+    private static function setAuthCookie(array $config, string $token): void
+    {
+        $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? (60 * 60 * 24 * 7));
+        if ($ttlSeconds <= 0) {
+            $ttlSeconds = 60 * 60 * 24 * 7;
+        }
+        $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+        setcookie('selo_token', $token, [
+            'expires' => time() + $ttlSeconds,
+            'path' => '/',
+            'secure' => $secure,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
     }
 }

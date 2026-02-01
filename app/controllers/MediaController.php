@@ -8,7 +8,13 @@ class MediaController
 {
     public static function serve(array $config, int $mediaId): void
     {
-        $user = Auth::requireUser($config);
+        $user = Auth::user($config);
+        if (!$user && isset($_COOKIE['selo_token']) && is_string($_COOKIE['selo_token'])) {
+            $user = Auth::userFromToken($config, $_COOKIE['selo_token']);
+        }
+        if (!$user) {
+            \App\Core\Response::json(['ok' => false, 'error' => 'احراز هویت نامعتبر است.'], 401);
+        }
         $download = isset($_GET['download']) && $_GET['download'] === '1';
 
         $pdo = Database::pdo();
