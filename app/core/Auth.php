@@ -30,6 +30,13 @@ class Auth
         if (!$token) {
             return null;
         }
+        $user = self::userFromToken($config, $token);
+        self::$user = $user ?: null;
+        return self::$user;
+    }
+
+    public static function userFromToken(array $config, string $token): ?array
+    {
         $payload = self::decodeToken($token, $config['app']['jwt_secret']);
         if (!$payload) {
             return null;
@@ -41,8 +48,7 @@ class Auth
         if ($user) {
             LogContext::setUserId((int)$user['id']);
         }
-        self::$user = $user ?: null;
-        return self::$user;
+        return $user ?: null;
     }
 
     public static function requireUser(array $config): array

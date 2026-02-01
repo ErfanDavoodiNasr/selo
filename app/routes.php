@@ -9,6 +9,7 @@ use App\Controllers\MediaController;
 use App\Controllers\ProfileController;
 use App\Controllers\GroupController;
 use App\Controllers\CallController;
+use App\Controllers\StreamController;
 
 $router = new Router();
 
@@ -69,6 +70,9 @@ $router->add('GET', '#^/api/messages$#', function () use ($config) {
 $router->add('POST', '#^/api/messages$#', function () use ($config) {
     MessageController::send($config);
 });
+$router->add('POST', '#^/api/messages/ack$#', function () use ($config) {
+    MessageController::ack($config);
+});
 $router->add('PUT', '#^/api/messages/(\\d+)/reaction$#', function ($matches) use ($config) {
     MessageController::react($config, (int)$matches[1]);
 });
@@ -80,6 +84,12 @@ $router->add('GET', '#^/api/messages/(\\d+)/reactions$#', function ($matches) us
 });
 $router->add('POST', '#^/api/uploads$#', function () use ($config) {
     UploadController::upload($config);
+});
+$router->add('GET', '#^/api/stream$#', function () use ($config) {
+    StreamController::stream($config);
+});
+$router->add('GET', '#^/api/poll$#', function () use ($config) {
+    StreamController::poll($config);
 });
 $router->add('GET', '#^/api/media/(\\d+)$#', function ($matches) use ($config) {
     MediaController::serve($config, (int)$matches[1]);
@@ -95,6 +105,9 @@ $router->add('POST', '#^/api/profile/photo$#', function () use ($config) {
 });
 $router->add('POST', '#^/api/profile/photo/active$#', function () use ($config) {
     ProfileController::setActive($config);
+});
+$router->add('DELETE', '#^/api/profile/photo/(\\d+)$#', function ($matches) use ($config) {
+    ProfileController::deletePhoto($config, (int)$matches[1]);
 });
 $router->add('POST', '#^/api/calls/token$#', function () use ($config) {
     CallController::token($config);
