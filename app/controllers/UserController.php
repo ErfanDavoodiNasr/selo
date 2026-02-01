@@ -16,7 +16,7 @@ class UserController
         $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, allow_voice_calls FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
         $stmt->execute([$user['id']]);
         $fresh = $stmt->fetch();
-        $photosStmt = $pdo->prepare('SELECT id, file_name, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? ORDER BY created_at DESC');
+        $photosStmt = $pdo->prepare('SELECT id, file_name, thumbnail_name, width, height, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC');
         $photosStmt->execute([$user['id']]);
         $photos = $photosStmt->fetchAll();
         Response::json(['ok' => true, 'data' => ['user' => $fresh, 'photos' => $photos]]);

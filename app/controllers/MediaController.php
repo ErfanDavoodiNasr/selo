@@ -12,12 +12,14 @@ class MediaController
         $download = isset($_GET['download']) && $_GET['download'] === '1';
 
         $pdo = Database::pdo();
-        $sql = 'SELECT mf.id, mf.file_name, mf.original_name, mf.mime_type, mf.type
+        $sql = 'SELECT DISTINCT mf.id, mf.file_name, mf.original_name, mf.mime_type, mf.type, mf.thumbnail_name
                 FROM ' . $config['db']['prefix'] . 'media_files mf
-                JOIN ' . $config['db']['prefix'] . 'messages m ON m.media_id = mf.id
+                LEFT JOIN ' . $config['db']['prefix'] . 'message_attachments ma ON ma.media_id = mf.id
+                LEFT JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = ma.message_id OR m.media_id = mf.id
                 LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
                 WHERE mf.id = ?
+                  AND m.id IS NOT NULL
                   AND (
                     (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
                     OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
@@ -41,16 +43,31 @@ class MediaController
             $baseDir = $config['uploads']['dir'] ?? (dirname(__DIR__, 2) . '/storage/uploads');
             $mediaDir = rtrim($baseDir, '/') . '/media';
         }
-        $path = rtrim($mediaDir, '/') . '/' . $media['file_name'];
+        $thumb = isset($_GET['thumb']) && $_GET['thumb'] === '1';
+        $fileName = $media['file_name'];
+        if ($thumb && !empty($media['thumbnail_name'])) {
+            $fileName = $media['thumbnail_name'];
+        }
+        $path = rtrim($mediaDir, '/') . '/' . $fileName;
         if (!file_exists($path)) {
             http_response_code(404);
             exit;
         }
 
         $mime = $media['mime_type'] ?: 'application/octet-stream';
+        if ($thumb) {
+            $finfo = new \finfo(FILEINFO_MIME_TYPE);
+            $thumbMime = $finfo->file($path);
+            if ($thumbMime) {
+                $mime = $thumbMime;
+            }
+        }
         $size = filesize($path);
         $safeName = self::safeFilename($media['original_name']);
         $disposition = ($download || $media['type'] === 'file') ? 'attachment' : 'inline';
+        if ($thumb) {
+            $disposition = 'inline';
+        }
 
         header('Content-Type: ' . $mime);
         header('X-Content-Type-Options: nosniff');
