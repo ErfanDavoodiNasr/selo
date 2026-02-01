@@ -88,6 +88,41 @@ function parseUploadMb(string $key, int $defaultBytes, array &$errors, string $l
     return (int)round($value * 1024 * 1024);
 }
 
+function parseDurationSeconds(string $valueKey, string $unitKey, int $defaultSeconds, array &$errors, string $label): int
+{
+    $rawValue = trim($_POST[$valueKey] ?? '');
+    if ($rawValue === '') {
+        return $defaultSeconds;
+    }
+    if (!is_numeric($rawValue)) {
+        $errors[] = $label . ' نامعتبر است.';
+        return $defaultSeconds;
+    }
+    $value = (float)$rawValue;
+    if ($value <= 0) {
+        $errors[] = $label . ' باید بزرگ‌تر از صفر باشد.';
+        return $defaultSeconds;
+    }
+
+    $unit = strtolower(trim($_POST[$unitKey] ?? ''));
+    $unitMap = [
+        'minute' => 60,
+        'hour' => 3600,
+        'day' => 86400,
+        'week' => 604800,
+    ];
+    if (!isset($unitMap[$unit])) {
+        $errors[] = $label . ' واحد نامعتبر است.';
+        return $defaultSeconds;
+    }
+    $seconds = (int)round($value * $unitMap[$unit]);
+    if ($seconds <= 0) {
+        $errors[] = $label . ' نامعتبر است.';
+        return $defaultSeconds;
+    }
+    return $seconds;
+}
+
 $defaultUploads = [
     'max_size' => 2 * 1024 * 1024,
     'media_max_size' => 20 * 1024 * 1024,
@@ -245,6 +280,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ];
 
             if (empty($errors)) {
+                $jwtTtlSeconds = parseDurationSeconds('jwt_ttl_value', 'jwt_ttl_unit', 60 * 60 * 24 * 7, $errors, 'مدت اعتبار توکن');
+            }
+
+            if (empty($errors)) {
                 $signalingUrl = preg_replace('#^http#i', 'ws', $appUrl);
                 $signalingUrl = rtrim($signalingUrl, '/') . '/ws';
                 $calls = [
@@ -263,6 +302,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'url' => $appUrl,
                         'timezone' => 'Asia/Tehran',
                         'jwt_secret' => $jwtSecret,
+                        'jwt_ttl_seconds' => $jwtTtlSeconds,
                     ],
                     'db' => $db,
                     'uploads' => $uploads,
@@ -308,6 +348,8 @@ $step4Defaults = [
     'app_url' => defaultAppUrl(),
     'jwt_secret' => '',
     'signaling_secret' => '',
+    'jwt_ttl_value' => '1',
+    'jwt_ttl_unit' => 'week',
     'upload_max_size' => bytesToMb($defaultUploads['max_size']),
     'upload_media_max_size' => bytesToMb($defaultUploads['media_max_size']),
     'upload_photo_max_size' => bytesToMb($defaultUploads['photo_max_size']),
@@ -320,6 +362,8 @@ $step4Values = [
     'app_url' => $_POST['app_url'] ?? $step4Defaults['app_url'],
     'jwt_secret' => $_POST['jwt_secret'] ?? $step4Defaults['jwt_secret'],
     'signaling_secret' => $_POST['signaling_secret'] ?? $step4Defaults['signaling_secret'],
+    'jwt_ttl_value' => $_POST['jwt_ttl_value'] ?? $step4Defaults['jwt_ttl_value'],
+    'jwt_ttl_unit' => $_POST['jwt_ttl_unit'] ?? $step4Defaults['jwt_ttl_unit'],
     'upload_max_size' => $_POST['upload_max_size'] ?? $step4Defaults['upload_max_size'],
     'upload_media_max_size' => $_POST['upload_media_max_size'] ?? $step4Defaults['upload_media_max_size'],
     'upload_photo_max_size' => $_POST['upload_photo_max_size'] ?? $step4Defaults['upload_photo_max_size'],
@@ -346,6 +390,7 @@ $step4Values = [
         .list li { margin: 6px 0; }
         label { display: block; margin: 8px 0 4px; }
         input { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; }
+        select { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
         button { margin-top: 16px; background: #2563eb; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; }
         .secondary { background: #6b7280; }
         .row { display: flex; gap: 16px; }
@@ -355,6 +400,7 @@ $step4Values = [
         .input-row .actions { width: 200px; display: flex; flex-direction: column; gap: 10px; }
         .input-row .actions button { width: 100%; margin-top: 0; }
         .checkbox-inline { display: flex; gap: 8px; align-items: center; margin: 0; }
+        .hint { color: #6b7280; font-size: 12px; margin: 4px 0 0; }
         @media (max-width: 640px) {
             .input-row { flex-direction: column; }
             .input-row .actions { width: 100%; }
@@ -459,6 +505,23 @@ $step4Values = [
                         </label>
                     </div>
                 </div>
+                <label>مدت اعتبار توکن JWT</label>
+                <div class="row">
+                    <div>
+                        <label>مقدار</label>
+                        <input type="number" name="jwt_ttl_value" min="1" step="0.1" value="<?php echo htmlspecialchars((string)$step4Values['jwt_ttl_value'], ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div>
+                        <label>واحد</label>
+                        <select name="jwt_ttl_unit">
+                            <option value="minute" <?php echo $step4Values['jwt_ttl_unit'] === 'minute' ? 'selected' : ''; ?>>دقیقه</option>
+                            <option value="hour" <?php echo $step4Values['jwt_ttl_unit'] === 'hour' ? 'selected' : ''; ?>>ساعت</option>
+                            <option value="day" <?php echo $step4Values['jwt_ttl_unit'] === 'day' ? 'selected' : ''; ?>>روز</option>
+                            <option value="week" <?php echo $step4Values['jwt_ttl_unit'] === 'week' ? 'selected' : ''; ?>>هفته</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="hint">مثال: ۵ دقیقه یا ۳ هفته</div>
                 <h4>محدودیت حجم آپلود (مگابایت)</h4>
                 <div class="row">
                     <div>

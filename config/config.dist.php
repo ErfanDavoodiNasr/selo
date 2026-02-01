@@ -7,6 +7,7 @@ return [
         'url' => 'http://localhost',
         'timezone' => 'Asia/Tehran',
         'jwt_secret' => 'CHANGE_ME',
+        'jwt_ttl_seconds' => 604800,
     ],
     'db' => [
         'host' => 'localhost',

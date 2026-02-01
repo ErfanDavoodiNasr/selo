@@ -8,11 +8,15 @@ class Auth
     public static function issueToken(array $user, array $config): string
     {
         $header = ['alg' => 'HS256', 'typ' => 'JWT'];
+        $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? (60 * 60 * 24 * 7));
+        if ($ttlSeconds <= 0) {
+            $ttlSeconds = 60 * 60 * 24 * 7;
+        }
         $payload = [
             'iss' => $config['app']['url'] ?? 'selo',
             'sub' => $user['id'],
             'iat' => time(),
-            'exp' => time() + (60 * 60 * 24 * 7), // 7 days
+            'exp' => time() + $ttlSeconds,
         ];
         $base64Header = Utils::base64UrlEncode(json_encode($header));
         $base64Payload = Utils::base64UrlEncode(json_encode($payload));
