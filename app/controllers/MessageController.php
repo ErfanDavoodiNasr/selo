@@ -3,6 +3,9 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\MessageAttachmentService;
+use App\Core\MessageMediaService;
+use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
@@ -36,7 +39,7 @@ class MessageController
             $params[] = $beforeId;
         }
 
-        $sql = 'SELECT m.id, m.type, m.body, m.media_id, m.sender_id, m.recipient_id, m.reply_to_message_id, m.created_at,
+        $sql = 'SELECT m.id, m.conversation_id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.recipient_id, m.reply_to_message_id, m.created_at,
                 su.full_name AS sender_name,
                 ru.id AS reply_id, ru.type AS reply_type, ru.body AS reply_body, ru.sender_id AS reply_sender_id,
                 ruser.full_name AS reply_sender_name,
@@ -69,8 +72,12 @@ class MessageController
         $messages = array_reverse($stmt->fetchAll());
         foreach ($messages as &$row) {
             $row['id'] = (int)$row['id'];
+            $row['conversation_id'] = $row['conversation_id'] !== null ? (int)$row['conversation_id'] : null;
+            $row['group_id'] = $row['group_id'] !== null ? (int)$row['group_id'] : null;
             $row['sender_id'] = (int)$row['sender_id'];
             $row['recipient_id'] = (int)$row['recipient_id'];
+            $row['attachments_count'] = (int)$row['attachments_count'];
+            $row['client_id'] = $row['client_id'] !== null && $row['client_id'] !== '' ? $row['client_id'] : null;
             $row['media_id'] = $row['media_id'] !== null ? (int)$row['media_id'] : null;
             if ($row['reply_id'] !== null) {
                 $row['reply_id'] = (int)$row['reply_id'];
@@ -99,6 +106,8 @@ class MessageController
             unset($row['media_type'], $row['media_file_name'], $row['media_original_name'], $row['media_mime_type'], $row['media_size_bytes'], $row['media_duration'], $row['media_width'], $row['media_height'], $row['media_thumbnail_name']);
         }
         $messages = MessageReactionService::hydrate($config, $messages, (int)$user['id']);
+        $messages = MessageAttachmentService::hydrate($config, $messages);
+        $messages = MessageReceiptService::hydrate($config, $messages, (int)$user['id']);
         Response::json(['ok' => true, 'data' => $messages]);
     }
 
@@ -107,29 +116,38 @@ class MessageController
         $user = Auth::requireUser($config);
         $data = Request::json();
         $conversationId = (int)($data['conversation_id'] ?? 0);
-        $type = strtolower(trim($data['type'] ?? 'text'));
+        $typeHint = strtolower(trim($data['type'] ?? 'text'));
         $body = trim($data['body'] ?? '');
-        $mediaId = isset($data['media_id']) ? (int)$data['media_id'] : null;
+        $clientId = trim((string)($data['client_id'] ?? ''));
+        $mediaIds = MessageMediaService::normalizeMediaIds($data['media_ids'] ?? [], isset($data['media_id']) ? (int)$data['media_id'] : null);
         $replyTo = isset($data['reply_to_message_id']) ? (int)$data['reply_to_message_id'] : null;
 
         if ($conversationId <= 0) {
             Response::json(['ok' => false, 'error' => 'گفتگو نامعتبر است.'], 422);
         }
-        $allowedTypes = ['text', 'voice', 'file', 'photo', 'video'];
-        if (!in_array($type, $allowedTypes, true)) {
+        $allowedTypes = ['text', 'voice', 'file', 'photo', 'video', 'media'];
+        if (!in_array($typeHint, $allowedTypes, true)) {
             Response::json(['ok' => false, 'error' => 'نوع پیام نامعتبر است.'], 422);
         }
-        if ($type === 'text') {
-            if (!Validator::messageBody($body)) {
-                Response::json(['ok' => false, 'error' => 'متن پیام معتبر نیست.'], 422);
-            }
-        } else {
-            if ($mediaId === null || $mediaId <= 0) {
-                Response::json(['ok' => false, 'error' => 'فایل پیام ارسال نشده است.'], 422);
+
+        if ($clientId !== '') {
+            if (strlen($clientId) > 36 || !preg_match('/^[a-zA-Z0-9\\-]+$/', $clientId)) {
+                Response::json(['ok' => false, 'error' => 'شناسه پیام نامعتبر است.'], 422);
             }
         }
 
         $pdo = Database::pdo();
+
+        // Client-side de-duplication for retries.
+        if ($clientId !== '') {
+            $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? LIMIT 1');
+            $dupStmt->execute([$user['id'], $clientId]);
+            $dup = $dupStmt->fetch();
+            if ($dup) {
+                Response::json(['ok' => true, 'data' => ['message_id' => (int)$dup['id'], 'deduped' => true]]);
+            }
+        }
+
         $stmt = $pdo->prepare('SELECT user_one_id, user_two_id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? LIMIT 1');
         $stmt->execute([$conversationId]);
         $conv = $stmt->fetch();
@@ -138,16 +156,39 @@ class MessageController
         }
         $recipientId = ($conv['user_one_id'] == $user['id']) ? $conv['user_two_id'] : $conv['user_one_id'];
 
-        if ($type !== 'text') {
-            $mediaStmt = $pdo->prepare('SELECT id, type FROM ' . $config['db']['prefix'] . 'media_files WHERE id = ? AND user_id = ? LIMIT 1');
-            $mediaStmt->execute([$mediaId, $user['id']]);
-            $media = $mediaStmt->fetch();
-            if (!$media) {
-                Response::json(['ok' => false, 'error' => 'فایل یافت نشد.'], 404);
+        $hasMedia = !empty($mediaIds);
+        $maxAttachments = (int)($config['uploads']['max_files_per_request'] ?? 10);
+        if ($hasMedia && count($mediaIds) > $maxAttachments) {
+            Response::json(['ok' => false, 'error' => 'تعداد پیوست‌ها بیش از حد مجاز است.'], 422);
+        }
+        if (!$hasMedia) {
+            if (!Validator::messageBody($body)) {
+                Response::json(['ok' => false, 'error' => 'متن پیام معتبر نیست.'], 422);
             }
-            if ($media['type'] !== $type) {
-                Response::json(['ok' => false, 'error' => 'نوع فایل با پیام مطابقت ندارد.'], 422);
+        } else {
+            if ($body !== '' && !Validator::messageBody($body)) {
+                Response::json(['ok' => false, 'error' => 'متن پیام معتبر نیست.'], 422);
             }
+        }
+
+        $mediaMap = MessageMediaService::loadUserMedia($config, (int)$user['id'], $mediaIds);
+        if ($hasMedia && count($mediaMap) !== count($mediaIds)) {
+            Response::json(['ok' => false, 'error' => 'فایل یافت نشد.'], 404);
+        }
+
+        $primaryMediaId = $hasMedia ? (int)$mediaIds[0] : null;
+        $messageType = 'text';
+        if ($hasMedia) {
+            if (count($mediaIds) === 1) {
+                $messageType = $mediaMap[$primaryMediaId] ?? $typeHint;
+                if ($typeHint !== 'media' && $typeHint !== 'text' && $typeHint !== $messageType) {
+                    Response::json(['ok' => false, 'error' => 'نوع فایل با پیام مطابقت ندارد.'], 422);
+                }
+            } else {
+                $messageType = 'media';
+            }
+        } elseif ($typeHint !== 'text') {
+            Response::json(['ok' => false, 'error' => 'فایل پیام ارسال نشده است.'], 422);
         }
 
         if ($replyTo) {
@@ -159,15 +200,100 @@ class MessageController
         }
 
         $now = date('Y-m-d H:i:s');
-        $bodyValue = ($type === 'text') ? $body : null;
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, sender_id, recipient_id, type, body, media_id, reply_to_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-        $insert->execute([$conversationId, $user['id'], $recipientId, $type, $bodyValue, $mediaId, $replyTo, $now]);
+        $bodyValue = ($hasMedia || $body !== '') ? $body : null;
+        $attachmentsCount = $hasMedia ? count($mediaIds) : 0;
+        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $insert->execute([$conversationId, $user['id'], $recipientId, $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
         $messageId = (int)$pdo->lastInsertId();
+
+        if ($hasMedia) {
+            $attInsert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_attachments (message_id, media_id, sort_order, created_at) VALUES (?, ?, ?, ?)');
+            $sort = 0;
+            foreach ($mediaIds as $mid) {
+                $attInsert->execute([$messageId, $mid, $sort, $now]);
+                $sort++;
+            }
+        }
 
         $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
         $update->execute([$messageId, $now, $conversationId]);
 
         Response::json(['ok' => true, 'data' => ['message_id' => $messageId]]);
+    }
+
+    public static function ack(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        $messageIds = $data['message_ids'] ?? [];
+        if (!is_array($messageIds)) {
+            Response::json(['ok' => false, 'error' => 'لیست پیام نامعتبر است.'], 422);
+        }
+        $status = strtolower(trim($data['status'] ?? ''));
+        if (!in_array($status, ['delivered', 'seen'], true)) {
+            Response::json(['ok' => false, 'error' => 'وضعیت نامعتبر است.'], 422);
+        }
+
+        $ids = [];
+        foreach ($messageIds as $id) {
+            $intId = (int)$id;
+            if ($intId > 0) {
+                $ids[] = $intId;
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if (empty($ids)) {
+            Response::json(['ok' => true, 'data' => ['acknowledged' => []]]);
+        }
+
+        $pdo = Database::pdo();
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $params = [$user['id'], 'active'];
+        $params = array_merge($params, $ids);
+        $params[] = $user['id'];
+        $params[] = $user['id'];
+        $params[] = $user['id'];
+
+        $sql = 'SELECT m.id
+            FROM ' . $config['db']['prefix'] . 'messages m
+            LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+            WHERE m.id IN (' . $placeholders . ')
+              AND m.sender_id != ?
+              AND m.is_deleted_for_all = 0
+              AND (
+                (m.conversation_id IS NOT NULL AND m.recipient_id = ?)
+                OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                WHERE md.message_id = m.id AND md.user_id = ?
+              )';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+
+        $validIds = [];
+        foreach ($rows as $row) {
+            $validIds[] = (int)$row['id'];
+        }
+        if (empty($validIds)) {
+            Response::json(['ok' => true, 'data' => ['acknowledged' => []]]);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $insert = $pdo->prepare('INSERT IGNORE INTO ' . $config['db']['prefix'] . 'message_receipts (message_id, user_id, status, created_at) VALUES (?, ?, ?, ?)');
+
+        if ($status === 'seen') {
+            foreach ($validIds as $mid) {
+                $insert->execute([$mid, $user['id'], 'delivered', $now]);
+            }
+        }
+        foreach ($validIds as $mid) {
+            $insert->execute([$mid, $user['id'], $status, $now]);
+        }
+
+        Response::json(['ok' => true, 'data' => ['acknowledged' => $validIds]]);
     }
 
     public static function deleteForMe(array $config): void

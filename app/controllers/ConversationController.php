@@ -13,6 +13,7 @@ class ConversationController
         $user = Auth::requireUser($config);
         $pdo = Database::pdo();
         $sql = 'SELECT c.id, c.created_at AS conv_created_at, c.last_message_at, m.body AS last_body, m.type AS last_type, m.sender_id AS last_sender_id,
+                m.attachments_count AS last_attachments_count,
                 mf.original_name AS last_file_name,
                 u.id AS other_id, u.full_name AS other_name, u.username AS other_username, u.allow_voice_calls AS other_allow_voice_calls, up.id AS other_photo
                 FROM ' . $config['db']['prefix'] . 'conversations c
@@ -32,7 +33,7 @@ class ConversationController
             $conv['other_photo'] = $conv['other_photo'] !== null ? (int)$conv['other_photo'] : null;
             $conv['other_allow_voice_calls'] = (int)$conv['other_allow_voice_calls'] === 1;
             $conv['chat_type'] = 'direct';
-            $conv['last_preview'] = self::previewText($conv['last_type'] ?? 'text', $conv['last_body'] ?? '', $conv['last_file_name'] ?? '');
+            $conv['last_preview'] = self::previewText($conv['last_type'] ?? 'text', $conv['last_body'] ?? '', $conv['last_file_name'] ?? '', (int)($conv['last_attachments_count'] ?? 0));
             $conv['sort_time'] = $conv['last_message_at'] ?? $conv['conv_created_at'];
             unset($conv['conv_created_at']);
         }
@@ -40,6 +41,7 @@ class ConversationController
         $groupSql = 'SELECT g.id, g.title, g.avatar_path, g.privacy_type, g.public_handle, g.created_at,
                 gm.role AS member_role,
                 m.body AS last_body, m.type AS last_type, m.sender_id AS last_sender_id, m.created_at AS last_message_at,
+                m.attachments_count AS last_attachments_count,
                 mf.original_name AS last_file_name,
                 su.full_name AS last_sender_name
                 FROM ' . $config['db']['prefix'] . 'groups g
@@ -59,7 +61,7 @@ class ConversationController
         $groups = $gStmt->fetchAll();
         $groupItems = [];
         foreach ($groups as $group) {
-            $preview = self::previewText($group['last_type'] ?? 'text', $group['last_body'] ?? '', $group['last_file_name'] ?? '');
+            $preview = self::previewText($group['last_type'] ?? 'text', $group['last_body'] ?? '', $group['last_file_name'] ?? '', (int)($group['last_attachments_count'] ?? 0));
             if ($preview !== '' && !empty($group['last_sender_name'])) {
                 $preview = $group['last_sender_name'] . ': ' . $preview;
             }
@@ -116,9 +118,12 @@ class ConversationController
         Response::json(['ok' => true, 'data' => ['conversation_id' => (int)$pdo->lastInsertId()]]);
     }
 
-    private static function previewText(string $type, string $body, string $filename): string
+    private static function previewText(string $type, string $body, string $filename, int $attachmentsCount = 0): string
     {
         $type = $type ?: 'text';
+        if ($type === 'media' || $attachmentsCount > 1) {
+            return '📎 ' . ($attachmentsCount > 0 ? $attachmentsCount . ' پیوست' : 'پیوست');
+        }
         if ($type === 'text') {
             return $body;
         }
