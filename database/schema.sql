@@ -23,7 +23,11 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}user_profile_photos` (
   `file_name` VARCHAR(255) NOT NULL,
   `mime_type` VARCHAR(100) NOT NULL,
   `file_size` INT UNSIGNED NOT NULL,
+  `width` INT UNSIGNED NULL,
+  `height` INT UNSIGNED NULL,
+  `thumbnail_name` VARCHAR(255) NULL,
   `is_active` TINYINT(1) NOT NULL DEFAULT 0,
+  `deleted_at` DATETIME NULL,
   `created_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_user_id` (`user_id`),
@@ -110,13 +114,16 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   `group_id` BIGINT UNSIGNED NULL,
   `sender_id` INT UNSIGNED NOT NULL,
   `recipient_id` INT UNSIGNED NULL,
-  `type` ENUM('text', 'voice', 'file', 'photo', 'video') NOT NULL DEFAULT 'text',
+  `client_id` VARCHAR(36) NULL,
+  `type` ENUM('text', 'voice', 'file', 'photo', 'video', 'media') NOT NULL DEFAULT 'text',
   `body` TEXT NULL,
   `media_id` BIGINT UNSIGNED NULL,
+  `attachments_count` INT UNSIGNED NOT NULL DEFAULT 0,
   `reply_to_message_id` BIGINT UNSIGNED NULL,
   `is_deleted_for_all` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_message_client` (`sender_id`, `client_id`),
   KEY `idx_conversation` (`conversation_id`),
   KEY `idx_group` (`group_id`),
   KEY `idx_group_created` (`group_id`, `created_at`),
@@ -128,6 +135,35 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   CONSTRAINT `fk_msg_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_msg_group` FOREIGN KEY (`group_id`) REFERENCES `{{prefix}}groups` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_msg_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}message_attachments` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `message_id` BIGINT UNSIGNED NOT NULL,
+  `media_id` BIGINT UNSIGNED NOT NULL,
+  `sort_order` INT UNSIGNED NOT NULL DEFAULT 0,
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_message_media` (`message_id`, `media_id`),
+  KEY `idx_message` (`message_id`),
+  KEY `idx_media` (`media_id`),
+  CONSTRAINT `fk_msgatt_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_msgatt_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}message_receipts` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `message_id` BIGINT UNSIGNED NOT NULL,
+  `user_id` INT UNSIGNED NOT NULL,
+  `status` ENUM('delivered', 'seen') NOT NULL,
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_message_user_status` (`message_id`, `user_id`, `status`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_message_id` (`message_id`),
+  KEY `idx_id_user` (`id`, `user_id`),
+  CONSTRAINT `fk_receipt_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_receipt_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `{{prefix}}call_logs` (
