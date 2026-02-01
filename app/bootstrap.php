@@ -24,7 +24,18 @@ spl_autoload_register(function ($class) {
         return;
     }
     $relativeClass = substr($class, strlen($prefix));
-    $file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
+    $relativePath = str_replace('\\', '/', $relativeClass);
+    $file = $baseDir . $relativePath . '.php';
+    if (!file_exists($file)) {
+        $parts = explode('/', $relativePath);
+        if (count($parts) > 1) {
+            $parts[0] = strtolower($parts[0]);
+            $altFile = $baseDir . implode('/', $parts) . '.php';
+            if (file_exists($altFile)) {
+                $file = $altFile;
+            }
+        }
+    }
     if (file_exists($file)) {
         require $file;
     }
