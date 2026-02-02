@@ -1,9 +1,11 @@
 const WebSocket = require('ws');
 const crypto = require('crypto');
+const http = require('http');
 const fetch = require('node-fetch');
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
-const WS_PATH = process.env.WS_PATH || '/ws';
+const HOST = process.env.HOST || '127.0.0.1';
+const WS_PATH = normalizePath(process.env.WS_PATH || '/ws');
 const SIGNALING_SECRET = process.env.SIGNALING_SECRET || '';
 const API_BASE = (process.env.API_BASE || '').replace(/\/$/, '');
 const CALL_VALIDATE_ENDPOINT = process.env.CALL_VALIDATE_ENDPOINT || (API_BASE ? `${API_BASE}/api/calls/validate` : '');
@@ -16,6 +18,16 @@ const CALL_RATE_WINDOW = parseInt(process.env.CALL_RATE_WINDOW || '60', 10);
 if (!SIGNALING_SECRET) {
   console.error('SIGNALING_SECRET is required.');
   process.exit(1);
+}
+
+function normalizePath(path) {
+  const value = String(path || '').trim();
+  if (!value) return '/ws';
+  return value.startsWith('/') ? value : `/${value}`;
+}
+
+function isWsPath(pathname) {
+  return pathname === WS_PATH || pathname === `${WS_PATH}/`;
 }
 
 const clientsByUser = new Map();
@@ -363,9 +375,41 @@ function handleDisconnect(ws) {
   endSession(callId, 'failed');
 }
 
-const wss = new WebSocket.Server({ port: PORT, path: WS_PATH });
+const server = http.createServer((req, res) => {
+  if (req.url === '/' || req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
 
-wss.on('connection', (ws) => {
+const wss = new WebSocket.Server({ noServer: true });
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname = '/';
+  try {
+    const parsed = new URL(req.url, 'http://localhost');
+    pathname = parsed.pathname || '/';
+  } catch (err) {
+    pathname = '/';
+  }
+  if (!isWsPath(pathname)) {
+    console.warn('ws_upgrade_rejected', { path: pathname });
+    socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
+});
+
+wss.on('connection', (ws, req) => {
+  const xfwd = req.headers['x-forwarded-for'];
+  const ip = Array.isArray(xfwd) ? xfwd[0] : (xfwd || req.socket.remoteAddress || '');
+  console.info('ws_connected', { ip });
   ws.isAlive = true;
 
   ws.on('pong', () => {
@@ -426,6 +470,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     handleDisconnect(ws);
   });
+
+  ws.on('error', (err) => {
+    console.warn('ws_error', { message: err?.message || 'unknown' });
+  });
 });
 
 const interval = setInterval(() => {
@@ -443,4 +491,6 @@ wss.on('close', () => {
   clearInterval(interval);
 });
 
-console.log(`Signaling server listening on ws://0.0.0.0:${PORT}${WS_PATH}`);
+server.listen(PORT, HOST, () => {
+  console.log(`Signaling server listening on ws://${HOST}:${PORT}${WS_PATH}`);
+});
