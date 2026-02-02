@@ -1,6 +1,4 @@
 RewriteEngine On
-RewriteBase /
-
 # Block access to sensitive directories if root is web-accessible
 RewriteRule ^(config|storage|app|database)/ - [F]
 

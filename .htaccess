@@ -1,6 +1,4 @@
 RewriteEngine On
-RewriteBase /
-
 # Block access to sensitive directories
 RewriteRule ^(config|storage|app|database|signaling)(/|$) - [F]
 
