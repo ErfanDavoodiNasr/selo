@@ -3,11 +3,16 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\UploadPaths;
 
 class MediaController
 {
     public static function serve(array $config, int $mediaId): void
     {
+        if ($mediaId <= 0) {
+            http_response_code(404);
+            exit;
+        }
         $user = Auth::user($config);
         if (!$user && isset($_COOKIE['selo_token']) && is_string($_COOKIE['selo_token'])) {
             $user = Auth::userFromToken($config, $_COOKIE['selo_token']);
@@ -40,28 +45,38 @@ class MediaController
         $stmt->execute([$user['id'], 'active', $mediaId, $user['id'], $user['id'], $user['id']]);
         $media = $stmt->fetch();
         if (!$media) {
+            $existsStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'media_files WHERE id = ? LIMIT 1');
+            $existsStmt->execute([$mediaId]);
+            if ($existsStmt->fetch()) {
+                \App\Core\Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+            }
             http_response_code(404);
             exit;
         }
 
-        $mediaDir = $config['uploads']['media_dir'] ?? null;
-        if (!$mediaDir) {
-            $baseDir = $config['uploads']['dir'] ?? (dirname(__DIR__, 2) . '/storage/uploads');
-            $mediaDir = rtrim($baseDir, '/') . '/media';
-        }
+        $mediaDir = UploadPaths::mediaDir($config);
         $thumb = isset($_GET['thumb']) && $_GET['thumb'] === '1';
         $fileName = $media['file_name'];
-        if ($thumb && !empty($media['thumbnail_name'])) {
-            $fileName = $media['thumbnail_name'];
-        }
         $path = rtrim($mediaDir, '/') . '/' . $fileName;
-        if (!file_exists($path)) {
+        $isThumb = false;
+        if ($thumb && !empty($media['thumbnail_name'])) {
+            $thumbPath = rtrim($mediaDir, '/') . '/' . $media['thumbnail_name'];
+            if (is_file($thumbPath)) {
+                $path = $thumbPath;
+                $fileName = $media['thumbnail_name'];
+                $isThumb = true;
+            }
+        }
+        if (!is_file($path)) {
             http_response_code(404);
             exit;
         }
 
         $mime = $media['mime_type'] ?: 'application/octet-stream';
-        if ($thumb) {
+        if ($media['type'] === 'voice' && $mime === 'video/webm') {
+            $mime = 'audio/webm';
+        }
+        if ($thumb || $mime === '' || $mime === 'application/octet-stream') {
             $finfo = new \finfo(FILEINFO_MIME_TYPE);
             $thumbMime = $finfo->file($path);
             if ($thumbMime) {
@@ -69,7 +84,6 @@ class MediaController
             }
         }
         $size = filesize($path);
-        $safeName = self::safeFilename($media['original_name']);
         $disposition = ($download || $media['type'] === 'file') ? 'attachment' : 'inline';
         if ($thumb) {
             $disposition = 'inline';
@@ -79,7 +93,7 @@ class MediaController
         header('X-Content-Type-Options: nosniff');
         header('Accept-Ranges: bytes');
         header('Cache-Control: private, max-age=604800');
-        header('Content-Disposition: ' . $disposition . '; filename="' . $safeName . '"');
+        header('Content-Disposition: ' . self::buildContentDisposition($disposition, (string)($media['original_name'] ?? ''), (string)($media['file_name'] ?? ''), $mime));
 
         $start = 0;
         $end = $size - 1;
@@ -137,5 +151,56 @@ class MediaController
         }
         $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $name);
         return $safe !== '' ? $safe : 'file';
+    }
+
+    private static function buildContentDisposition(string $disposition, string $originalName, string $storedName, string $mime): string
+    {
+        $name = $originalName !== '' ? $originalName : 'file';
+        $name = self::ensureExtension($name, $storedName, $mime);
+        $ascii = self::safeFilename($name);
+        $header = $disposition . '; filename="' . $ascii . '"';
+        if ($name !== $ascii) {
+            $header .= "; filename*=UTF-8''" . rawurlencode($name);
+        }
+        return $header;
+    }
+
+    private static function ensureExtension(string $name, string $storedName, string $mime): string
+    {
+        $ext = pathinfo($name, PATHINFO_EXTENSION);
+        if ($ext !== '') {
+            return $name;
+        }
+        $ext = pathinfo($storedName, PATHINFO_EXTENSION);
+        if ($ext === '') {
+            $ext = self::extensionFromMime($mime);
+        }
+        if ($ext !== '') {
+            $name .= '.' . $ext;
+        }
+        return $name;
+    }
+
+    private static function extensionFromMime(string $mime): string
+    {
+        $map = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            'audio/ogg' => 'ogg',
+            'audio/webm' => 'webm',
+            'audio/mpeg' => 'mp3',
+            'audio/wav' => 'wav',
+            'audio/mp4' => 'm4a',
+            'audio/aac' => 'aac',
+            'video/mp4' => 'mp4',
+            'video/webm' => 'webm',
+            'video/ogg' => 'ogv',
+            'video/quicktime' => 'mov',
+            'application/pdf' => 'pdf',
+            'application/zip' => 'zip',
+            'application/x-zip-compressed' => 'zip',
+        ];
+        return $map[$mime] ?? '';
     }
 }

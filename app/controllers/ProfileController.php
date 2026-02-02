@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\UploadPaths;
 use App\Core\Response;
 
 class ProfileController
@@ -34,7 +35,7 @@ class ProfileController
         }
         $ext = $allowed[$mime];
         $filename = bin2hex(random_bytes(16)) . '.' . $ext;
-        $uploadDir = rtrim($config['uploads']['dir'], '/');
+        $uploadDir = rtrim(UploadPaths::baseDir($config), '/');
         if (!is_dir($uploadDir)) {
             @mkdir($uploadDir, 0755, true);
         }
@@ -95,7 +96,7 @@ class ProfileController
             $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET active_photo_id = NULL WHERE id = ?')->execute([$user['id']]);
         }
 
-        $uploadDir = rtrim($config['uploads']['dir'], '/');
+        $uploadDir = rtrim(UploadPaths::baseDir($config), '/');
         $path = $uploadDir . '/' . $photo['file_name'];
         if (is_file($path)) {
             @unlink($path);

@@ -9,6 +9,7 @@ class MessageAttachmentService
             return $messages;
         }
 
+        $mediaDir = rtrim(UploadPaths::mediaDir($config), '/');
         $ids = [];
         foreach ($messages as $msg) {
             $ids[] = (int)$msg['id'];
@@ -28,6 +29,9 @@ class MessageAttachmentService
 
         $map = [];
         foreach ($rows as $row) {
+            if (!self::mediaFileExists($mediaDir, $row['file_name'] ?? '')) {
+                continue;
+            }
             $mid = (int)$row['message_id'];
             if (!isset($map[$mid])) {
                 $map[$mid] = [];
@@ -53,18 +57,22 @@ class MessageAttachmentService
             // Backfill legacy single media into attachments if needed.
             if (empty($attachments) && !empty($msg['media'])) {
                 $media = $msg['media'];
-                $attachments = [[
-                    'id' => (int)$media['id'],
-                    'type' => $media['type'] ?? $msg['type'] ?? 'file',
-                    'file_name' => $media['file_name'] ?? null,
-                    'original_name' => $media['original_name'] ?? null,
-                    'mime_type' => $media['mime_type'] ?? null,
-                    'size_bytes' => isset($media['size_bytes']) ? (int)$media['size_bytes'] : null,
-                    'duration' => isset($media['duration']) ? (int)$media['duration'] : null,
-                    'width' => isset($media['width']) ? (int)$media['width'] : null,
-                    'height' => isset($media['height']) ? (int)$media['height'] : null,
-                    'thumbnail_name' => $media['thumbnail_name'] ?? null,
-                ]];
+                if (self::mediaFileExists($mediaDir, $media['file_name'] ?? '')) {
+                    $attachments = [[
+                        'id' => (int)$media['id'],
+                        'type' => $media['type'] ?? $msg['type'] ?? 'file',
+                        'file_name' => $media['file_name'] ?? null,
+                        'original_name' => $media['original_name'] ?? null,
+                        'mime_type' => $media['mime_type'] ?? null,
+                        'size_bytes' => isset($media['size_bytes']) ? (int)$media['size_bytes'] : null,
+                        'duration' => isset($media['duration']) ? (int)$media['duration'] : null,
+                        'width' => isset($media['width']) ? (int)$media['width'] : null,
+                        'height' => isset($media['height']) ? (int)$media['height'] : null,
+                        'thumbnail_name' => $media['thumbnail_name'] ?? null,
+                    ]];
+                } else {
+                    $msg['media'] = null;
+                }
             }
 
             $msg['attachments'] = $attachments;
@@ -73,5 +81,15 @@ class MessageAttachmentService
         unset($msg);
 
         return $messages;
+    }
+
+    private static function mediaFileExists(string $mediaDir, string $fileName): bool
+    {
+        $fileName = trim($fileName);
+        if ($fileName === '') {
+            return false;
+        }
+        $path = $mediaDir . '/' . ltrim($fileName, '/');
+        return is_file($path);
     }
 }

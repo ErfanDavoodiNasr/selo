@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\UploadPaths;
 use App\Core\Response;
 use App\Core\Logger;
 
@@ -45,11 +46,7 @@ class UploadController
         $maxPhotos = (int)($uploadsCfg['max_photos_per_request'] ?? self::DEFAULT_MAX_FILES);
         $maxVideos = (int)($uploadsCfg['max_videos_per_request'] ?? self::DEFAULT_MAX_FILES);
 
-        $mediaDir = $uploadsCfg['media_dir'] ?? null;
-        if (!$mediaDir) {
-            $baseDir = $uploadsCfg['dir'] ?? (dirname(__DIR__, 2) . '/storage/uploads');
-            $mediaDir = rtrim($baseDir, '/') . '/media';
-        }
+        $mediaDir = UploadPaths::mediaDir($config);
         if (!is_dir($mediaDir)) {
             @mkdir($mediaDir, 0755, true);
         }
@@ -105,6 +102,12 @@ class UploadController
             }
 
             $originalName = self::safeOriginalName($file['name'] ?? 'file');
+            if ($detectedType === 'file') {
+                $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION) ?? '');
+                if (self::isBlockedFile($ext, $mime)) {
+                    Response::json(['ok' => false, 'error' => 'نوع فایل مجاز نیست.'], 422);
+                }
+            }
             $ext = self::extensionFor($detectedType, $mime, $originalName);
             $filename = bin2hex(random_bytes(16)) . ($ext ? ('.' . $ext) : '');
             $destination = rtrim($mediaDir, '/') . '/' . $filename;
@@ -333,6 +336,39 @@ class UploadController
         }
 
         return $map[$mime] ?? 'bin';
+    }
+
+    private static function isBlockedFile(string $ext, string $mime): bool
+    {
+        $blockedExt = [
+            'php', 'phtml', 'php3', 'php4', 'php5', 'phar',
+            'pl', 'py', 'rb', 'cgi',
+            'exe', 'bat', 'cmd', 'sh', 'com', 'dll',
+            'js', 'mjs', 'cjs',
+            'html', 'htm', 'xhtml',
+            'svg', 'xml',
+        ];
+        $blockedMime = [
+            'text/html',
+            'application/xhtml+xml',
+            'application/javascript',
+            'text/javascript',
+            'application/x-php',
+            'text/x-php',
+            'application/x-httpd-php',
+            'application/x-sh',
+            'application/x-msdownload',
+            'image/svg+xml',
+            'text/xml',
+            'application/xml',
+        ];
+        if ($ext !== '' && in_array($ext, $blockedExt, true)) {
+            return true;
+        }
+        if ($mime !== '' && in_array($mime, $blockedMime, true)) {
+            return true;
+        }
+        return false;
     }
 
     private static function sanitizeInt($value, int $min, int $max): ?int
