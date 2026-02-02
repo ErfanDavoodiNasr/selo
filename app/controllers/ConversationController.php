@@ -3,6 +3,8 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\LastSeenService;
+use App\Core\PresenceService;
 use App\Core\Request;
 use App\Core\Response;
 
@@ -15,7 +17,9 @@ class ConversationController
         $sql = 'SELECT c.id, c.created_at AS conv_created_at, c.last_message_at, m.body AS last_body, m.type AS last_type, m.sender_id AS last_sender_id,
                 m.attachments_count AS last_attachments_count,
                 mf.original_name AS last_file_name,
-                u.id AS other_id, u.full_name AS other_name, u.username AS other_username, u.allow_voice_calls AS other_allow_voice_calls, up.id AS other_photo
+                u.id AS other_id, u.full_name AS other_name, u.username AS other_username, u.allow_voice_calls AS other_allow_voice_calls,
+                u.last_seen_at AS other_last_seen_at, u.last_seen_privacy AS other_last_seen_privacy,
+                up.id AS other_photo
                 FROM ' . $config['db']['prefix'] . 'conversations c
                 JOIN ' . $config['db']['prefix'] . 'users u
                     ON u.id = CASE WHEN c.user_one_id = ? THEN c.user_two_id ELSE c.user_one_id END
@@ -27,15 +31,30 @@ class ConversationController
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$user['id'], $user['id'], $user['id']]);
         $directs = $stmt->fetchAll();
+        $otherIds = [];
+        foreach ($directs as $conv) {
+            $otherIds[] = (int)$conv['other_id'];
+        }
+        $onlineMap = PresenceService::onlineMap($config, $otherIds);
+
         foreach ($directs as &$conv) {
             $conv['id'] = (int)$conv['id'];
             $conv['other_id'] = (int)$conv['other_id'];
             $conv['other_photo'] = $conv['other_photo'] !== null ? (int)$conv['other_photo'] : null;
             $conv['other_allow_voice_calls'] = (int)$conv['other_allow_voice_calls'] === 1;
+            $isOnline = isset($onlineMap[$conv['other_id']]);
+            $status = LastSeenService::statusFor(
+                $conv['other_last_seen_at'] ?? null,
+                $conv['other_last_seen_privacy'] ?? null,
+                $config,
+                $isOnline
+            );
+            $conv['status_text'] = $status['text'];
             $conv['chat_type'] = 'direct';
             $conv['last_preview'] = self::previewText($conv['last_type'] ?? 'text', $conv['last_body'] ?? '', $conv['last_file_name'] ?? '', (int)($conv['last_attachments_count'] ?? 0));
             $conv['sort_time'] = $conv['last_message_at'] ?? $conv['conv_created_at'];
             unset($conv['conv_created_at']);
+            unset($conv['other_last_seen_at'], $conv['other_last_seen_privacy']);
         }
 
         $groupSql = 'SELECT g.id, g.title, g.avatar_path, g.privacy_type, g.public_handle, g.created_at,

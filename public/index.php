@@ -358,6 +358,16 @@ if (strpos($path, $apiPrefix) === 0) {
                         </div>
                         <input id="allow-voice-calls-toggle" type="checkbox">
                     </div>
+                    <div class="toggle-row">
+                        <div class="toggle-text">
+                            <span>آخرین بازدید</span>
+                            <div class="toggle-desc">نحوه نمایش وضعیت آنلاین و آخرین بازدید شما.</div>
+                        </div>
+                        <select id="last-seen-privacy-select">
+                            <option value="everyone">نمایش دقیق</option>
+                            <option value="nobody">نمایش تقریبی (اخیراً / هفته اخیر / ماه اخیر)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
         </div>

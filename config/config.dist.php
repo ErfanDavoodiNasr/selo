@@ -37,6 +37,11 @@ return [
         'sse_heartbeat_seconds' => 20,
         'sse_max_seconds' => 55,
     ],
+    'presence' => [
+        'online_window_seconds' => 60,
+        'ping_interval_seconds' => 15,
+        'last_seen_touch_seconds' => 60,
+    ],
     'calls' => [
         'signaling_url' => 'ws://localhost:3001/ws',
         'signaling_secret' => 'CHANGE_ME',

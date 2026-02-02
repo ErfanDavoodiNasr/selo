@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\LastSeenService;
 use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
@@ -58,6 +59,7 @@ class AuthController
         $user = ['id' => (int)$userId, 'full_name' => $fullName, 'username' => $username, 'email' => $email];
         $token = Auth::issueToken($user, $config);
         self::setAuthCookie($config, $token);
+        LastSeenService::touch($config, (int)$userId);
 
         Logger::info('register_success', ['user_id' => (int)$userId, 'username' => $username], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
@@ -94,6 +96,7 @@ class AuthController
         RateLimiter::clear($ip, $identifier, $config);
         $token = Auth::issueToken($user, $config);
         self::setAuthCookie($config, $token);
+        LastSeenService::touch($config, (int)$user['id']);
         Logger::info('login_success', ['user_id' => (int)$user['id'], 'username' => $user['username']], 'auth');
         Response::json(['ok' => true, 'data' => ['token' => $token]]);
     }

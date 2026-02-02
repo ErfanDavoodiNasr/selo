@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\LastSeenService;
 use App\Core\MessageAttachmentService;
 use App\Core\MessageMediaService;
 use App\Core\MessageReceiptService;
@@ -356,6 +357,7 @@ class GroupController
     public static function listMessages(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
+        LastSeenService::touch($config, (int)$user['id']);
         if ($groupId <= 0) {
             Response::json(['ok' => false, 'error' => 'گروه نامعتبر است.'], 422);
         }
@@ -456,6 +458,7 @@ class GroupController
     public static function sendMessage(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
+        LastSeenService::touch($config, (int)$user['id']);
         if ($groupId <= 0) {
             Response::json(['ok' => false, 'error' => 'گروه نامعتبر است.'], 422);
         }

@@ -7,6 +7,7 @@ use App\Core\MessageAttachmentService;
 use App\Core\MessageMediaService;
 use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
+use App\Core\LastSeenService;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\RateLimiter;
@@ -17,6 +18,7 @@ class MessageController
     public static function list(array $config): void
     {
         $user = Auth::requireUser($config);
+        LastSeenService::touch($config, (int)$user['id']);
         $conversationId = (int) Request::param('conversation_id', 0);
         if ($conversationId <= 0) {
             Response::json(['ok' => false, 'error' => 'گفتگو نامعتبر است.'], 422);
@@ -114,6 +116,7 @@ class MessageController
     public static function send(array $config): void
     {
         $user = Auth::requireUser($config);
+        LastSeenService::touch($config, (int)$user['id']);
         $data = Request::json();
         $conversationId = (int)($data['conversation_id'] ?? 0);
         $typeHint = strtolower(trim($data['type'] ?? 'text'));

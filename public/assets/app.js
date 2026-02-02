@@ -145,6 +145,7 @@
   const userSettingsModal = document.getElementById('user-settings-modal');
   const userSettingsClose = document.getElementById('user-settings-close');
   const allowVoiceCallsToggle = document.getElementById('allow-voice-calls-toggle');
+  const lastSeenPrivacySelect = document.getElementById('last-seen-privacy-select');
   const profileAvatar = document.getElementById('profile-avatar');
   const profileNameInput = document.getElementById('profile-name');
   const profileUsernameInput = document.getElementById('profile-username');
@@ -1293,6 +1294,9 @@
   allowVoiceCallsToggle?.addEventListener('change', () => {
     updateAllowVoiceCalls(!!allowVoiceCallsToggle.checked);
   });
+  lastSeenPrivacySelect?.addEventListener('change', () => {
+    updateLastSeenPrivacy(lastSeenPrivacySelect.value);
+  });
 
   groupPrivacySelect?.addEventListener('change', () => {
     if (groupPrivacySelect.value === 'public') {
@@ -1554,6 +1558,7 @@
   }
 
   let conversationsRefreshTimer = null;
+  let conversationsAutoRefreshTimer = null;
   function scheduleConversationsRefresh() {
     if (conversationsRefreshTimer) return;
     conversationsRefreshTimer = setTimeout(async () => {
@@ -1840,8 +1845,13 @@
   }
 
   function syncUserSettingsUI() {
-    if (!allowVoiceCallsToggle) return;
-    allowVoiceCallsToggle.checked = !!state.me?.allow_voice_calls;
+    if (allowVoiceCallsToggle) {
+      allowVoiceCallsToggle.checked = !!state.me?.allow_voice_calls;
+    }
+    if (lastSeenPrivacySelect) {
+      const privacy = state.me?.last_seen_privacy === 'everyone' ? 'everyone' : 'nobody';
+      lastSeenPrivacySelect.value = privacy;
+    }
   }
 
   async function refreshMe() {
@@ -1969,6 +1979,28 @@
       alert(err.message || 'خطا در ذخیره تنظیمات');
     } finally {
       allowVoiceCallsToggle.disabled = false;
+    }
+  }
+
+  async function updateLastSeenPrivacy(value) {
+    if (!state.me || !lastSeenPrivacySelect) return;
+    const previous = lastSeenPrivacySelect.value;
+    lastSeenPrivacySelect.disabled = true;
+    try {
+      const res = await apiFetch(API.meSettings, { method: 'PATCH', body: { last_seen_privacy: value } });
+      if (!res.data.ok) {
+        throw new Error(res.data.message || res.data.error || 'خطا در ذخیره تنظیمات');
+      }
+      state.me.last_seen_privacy = res.data.data.last_seen_privacy;
+      lastSeenPrivacySelect.value = state.me.last_seen_privacy || 'everyone';
+      await loadConversations();
+      updateHeaderStatus();
+      updateInfoPanel();
+    } catch (err) {
+      lastSeenPrivacySelect.value = previous;
+      alert(err.message || 'خطا در ذخیره تنظیمات');
+    } finally {
+      lastSeenPrivacySelect.disabled = false;
     }
   }
 
@@ -2143,7 +2175,8 @@
       setChatStatus(count ? `${count} عضو` : 'گروه');
       return;
     }
-    setChatStatus('آخرین بازدید اخیراً');
+    const statusText = state.currentConversation.status_text || 'last seen recently';
+    setChatStatus(statusText);
   }
 
   function setInfoPanelVisible(visible) {
@@ -2180,7 +2213,11 @@
     }
 
     if (infoStatus) {
-      infoStatus.textContent = isGroup ? (chatUserStatus?.textContent || '') : 'آخرین بازدید اخیراً';
+      if (isGroup) {
+        infoStatus.textContent = chatUserStatus?.textContent || '';
+      } else {
+        infoStatus.textContent = state.currentConversation.status_text || 'last seen recently';
+      }
     }
 
     if (infoDescription) {
@@ -2336,7 +2373,16 @@
     const res = await apiFetch(API.conversations);
     if (res.data.ok) {
       state.conversations = res.data.data;
+      if (state.currentConversation) {
+        const current = state.conversations.find(c => c.id === state.currentConversation.id && c.chat_type === state.currentConversation.chat_type);
+        if (current) {
+          state.currentConversation = current;
+        }
+      }
       renderConversations();
+      if (state.currentConversation) {
+        setCurrentChatHeader(state.currentConversation);
+      }
     }
   }
 
@@ -3229,6 +3275,13 @@
         await selectConversation(state.conversations[0]);
       }
       startRealtime();
+      if (!conversationsAutoRefreshTimer) {
+        conversationsAutoRefreshTimer = setInterval(() => {
+          if (state.token) {
+            loadConversations();
+          }
+        }, 20000);
+      }
     } catch (err) {
       localStorage.removeItem('selo_token');
       state.token = null;

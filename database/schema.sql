@@ -9,12 +9,22 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}users` (
   `language` VARCHAR(10) NOT NULL DEFAULT 'fa',
   `active_photo_id` BIGINT UNSIGNED NULL,
   `allow_voice_calls` TINYINT(1) NOT NULL DEFAULT 1,
+  `last_seen_at` DATETIME NULL,
+  `last_seen_privacy` ENUM('everyone', 'nobody') NOT NULL DEFAULT 'everyone',
   `created_at` DATETIME NOT NULL,
   `updated_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_username` (`username`),
   UNIQUE KEY `uniq_email` (`email`),
   KEY `idx_active_photo` (`active_photo_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}user_presence` (
+  `user_id` INT UNSIGNED NOT NULL,
+  `last_ping_at` DATETIME NOT NULL,
+  PRIMARY KEY (`user_id`),
+  KEY `idx_last_ping_at` (`last_ping_at`),
+  CONSTRAINT `fk_presence_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `{{prefix}}user_profile_photos` (

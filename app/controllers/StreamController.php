@@ -3,6 +3,7 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\PresenceService;
 use App\Core\MessageAttachmentService;
 use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
@@ -41,6 +42,8 @@ class StreamController
         $retryMs = (int)($config['realtime']['sse_retry_ms'] ?? 2000);
         $heartbeat = (int)($config['realtime']['sse_heartbeat_seconds'] ?? 20);
         $maxSeconds = (int)($config['realtime']['sse_max_seconds'] ?? 55);
+        $pingInterval = (int)($config['presence']['ping_interval_seconds'] ?? 15);
+        $pingInterval = max(5, min(300, $pingInterval));
 
         echo 'retry: ' . $retryMs . "\n\n";
         self::emitEvent('hello', null, [
@@ -51,10 +54,15 @@ class StreamController
 
         $start = time();
         $lastPing = 0;
+        $lastPresence = 0;
 
         while (true) {
             if (connection_aborted()) {
                 break;
+            }
+            if ((time() - $lastPresence) >= $pingInterval) {
+                PresenceService::ping($config, (int)$user['id']);
+                $lastPresence = time();
             }
             $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId);
 
@@ -92,6 +100,7 @@ class StreamController
         if (!$user) {
             Response::json(['ok' => false, 'error' => 'احراز هویت نامعتبر است.'], 401);
         }
+        PresenceService::ping($config, (int)$user['id']);
 
         $lastMessageId = max(0, (int)Request::param('last_message_id', 0));
         $lastReceiptId = max(0, (int)Request::param('last_receipt_id', 0));
