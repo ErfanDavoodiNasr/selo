@@ -12,6 +12,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\RateLimiter;
 use App\Core\Validator;
+use App\Core\Logger;
 
 class MessageController
 {
@@ -221,6 +222,9 @@ class MessageController
         $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
         $update->execute([$messageId, $now, $conversationId]);
 
+        $receiptInsert = $pdo->prepare('INSERT IGNORE INTO ' . $config['db']['prefix'] . 'message_receipts (message_id, user_id, status, created_at) VALUES (?, ?, ?, ?)');
+        $receiptInsert->execute([$messageId, (int)$recipientId, 'delivered', $now]);
+
         Response::json(['ok' => true, 'data' => ['message_id' => $messageId]]);
     }
 
@@ -297,6 +301,70 @@ class MessageController
         }
 
         Response::json(['ok' => true, 'data' => ['acknowledged' => $validIds]]);
+    }
+
+    public static function unreadCount(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $counts = MessageReceiptService::unreadCounts($config, (int)$user['id']);
+        Response::json([
+            'ok' => true,
+            'data' => [
+                'total_unread' => (int)$counts['total'],
+                'by_conversation' => $counts['by_conversation'],
+            ],
+        ]);
+    }
+
+    public static function markRead(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        $conversationId = (int)($data['conversation_id'] ?? 0);
+        $upTo = isset($data['up_to_message_id']) ? (int)$data['up_to_message_id'] : null;
+        if ($conversationId <= 0) {
+            Response::json(['ok' => false, 'error' => 'گفتگو نامعتبر است.'], 422);
+        }
+
+        $pdo = Database::pdo();
+        $check = $pdo->prepare('SELECT user_one_id, user_two_id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? LIMIT 1');
+        $check->execute([$conversationId]);
+        $conv = $check->fetch();
+        if (!$conv || ($conv['user_one_id'] != $user['id'] && $conv['user_two_id'] != $user['id'])) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+
+        $marked = MessageReceiptService::markReadForConversation($config, (int)$user['id'], $conversationId, $upTo);
+        $counts = MessageReceiptService::unreadCounts($config, (int)$user['id']);
+        Response::json([
+            'ok' => true,
+            'data' => [
+                'marked' => $marked,
+                'total_unread' => (int)$counts['total'],
+                'by_conversation' => $counts['by_conversation'],
+            ],
+        ]);
+    }
+
+    public static function status(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $conversationId = (int)Request::param('conversation_id', 0);
+        if ($conversationId <= 0) {
+            Response::json(['ok' => false, 'error' => 'گفتگو نامعتبر است.'], 422);
+        }
+        $sinceId = (int)Request::param('since_id', 0);
+
+        $pdo = Database::pdo();
+        $check = $pdo->prepare('SELECT user_one_id, user_two_id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? LIMIT 1');
+        $check->execute([$conversationId]);
+        $conv = $check->fetch();
+        if (!$conv || ($conv['user_one_id'] != $user['id'] && $conv['user_two_id'] != $user['id'])) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+        $otherId = ($conv['user_one_id'] == $user['id']) ? (int)$conv['user_two_id'] : (int)$conv['user_one_id'];
+        $data = MessageReceiptService::statusForConversation($config, (int)$user['id'], $otherId, $conversationId, $sinceId);
+        Response::json(['ok' => true, 'data' => $data]);
     }
 
     public static function deleteForMe(array $config): void
@@ -386,16 +454,56 @@ class MessageController
             Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
         }
 
+        $reactionCfg = $config['reactions'] ?? [];
+        $cooldownSeconds = (int)($reactionCfg['cooldown_seconds'] ?? 2);
+        $rateCfg = $reactionCfg['rate_limit'] ?? [];
+        $maxAttempts = (int)($rateCfg['max_attempts'] ?? 12);
+        $windowMinutes = (int)($rateCfg['window_minutes'] ?? 1);
+        $lockMinutes = (int)($rateCfg['lock_minutes'] ?? 1);
+
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-        $identifier = 'reaction:' . $user['id'];
-        if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, 20, 1, 1)) {
+        $identifier = 'reaction:' . $user['id'] . ':' . $messageId;
+        if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes)) {
             Response::json(['ok' => false, 'error' => 'تعداد درخواست‌ها زیاد است. کمی بعد تلاش کنید.'], 429);
         }
-        RateLimiter::hitCustom($ip, $identifier, $config, 20, 1, 1);
+        RateLimiter::hitCustom($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes);
+
+        if ($cooldownSeconds > 0) {
+            $cooldownStmt = $pdo->prepare('SELECT reaction_emoji, updated_at FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ? AND user_id = ? LIMIT 1');
+            $cooldownStmt->execute([$messageId, $user['id']]);
+            $cooldownRow = $cooldownStmt->fetch();
+            if ($cooldownRow && isset($cooldownRow['reaction_emoji']) && $cooldownRow['reaction_emoji'] === $emoji) {
+                Response::json(['ok' => true]);
+            }
+            if ($cooldownRow && !empty($cooldownRow['updated_at'])) {
+                $lastUpdate = strtotime($cooldownRow['updated_at']);
+                if ($lastUpdate && (time() - $lastUpdate) < $cooldownSeconds) {
+                    Response::json(['ok' => false, 'error' => 'لطفاً کمی صبر کنید.'], 429);
+                }
+            }
+        }
 
         $now = date('Y-m-d H:i:s');
-        $stmt = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_reactions (message_id, user_id, reaction_emoji, created_at, updated_at)\n            VALUES (?, ?, ?, ?, ?)\n            ON DUPLICATE KEY UPDATE reaction_emoji = VALUES(reaction_emoji), updated_at = VALUES(updated_at)');
-        $stmt->execute([$messageId, $user['id'], $emoji, $now, $now]);
+        try {
+            $stmt = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_reactions (message_id, user_id, reaction_emoji, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE reaction_emoji = VALUES(reaction_emoji), updated_at = VALUES(updated_at)');
+            $stmt->execute([$messageId, $user['id'], $emoji, $now, $now]);
+        } catch (\PDOException $e) {
+            $msg = $e->getMessage();
+            $code = $e->getCode();
+            $info = $e->errorInfo ?? [];
+            $driverCode = isset($info[1]) ? (int)$info[1] : 0;
+            Logger::error('reaction_failed', ['message_id' => $messageId, 'user_id' => (int)$user['id'], 'error' => $msg], 'reaction');
+            if ($driverCode === 1366 || strpos($msg, 'Incorrect string value') !== false) {
+                Response::json(['ok' => false, 'error' => 'پایگاه داده باید با utf8mb4 تنظیم شود.'], 500);
+            }
+            if ($driverCode === 1146 || strpos($msg, 'doesn\'t exist') !== false) {
+                Response::json(['ok' => false, 'error' => 'جدول واکنش‌ها یافت نشد. لطفاً migration را اجرا کنید.'], 500);
+            }
+            if ($driverCode === 1452 || strpos($msg, 'foreign key constraint fails') !== false) {
+                Response::json(['ok' => false, 'error' => 'پیام یا کاربر نامعتبر است.'], 422);
+            }
+            Response::json(['ok' => false, 'error' => 'خطا در ذخیره واکنش.'], 500);
+        }
 
         Response::json(['ok' => true]);
     }

@@ -52,9 +52,12 @@ class CallController
         $data = Request::json();
         $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
         $rate = $config['calls']['rate_limit'] ?? [];
-        $max = (int)($rate['max_attempts'] ?? 6);
+        $max = (int)($rate['max_attempts'] ?? 30);
         $window = (int)($rate['window_minutes'] ?? 1);
-        $lock = (int)($rate['lock_minutes'] ?? 2);
+        $lock = (int)($rate['lock_minutes'] ?? 1);
+        $max = max(1, $max);
+        $window = max(1, $window);
+        $lock = max(1, $lock);
         $identifier = 'call_token_' . $user['id'];
 
         if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, $max, $window, $lock)) {

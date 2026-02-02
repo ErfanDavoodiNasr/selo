@@ -4,6 +4,7 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\Database;
 use App\Core\LastSeenService;
+use App\Core\MessageReceiptService;
 use App\Core\PresenceService;
 use App\Core\Request;
 use App\Core\Response;
@@ -36,12 +37,15 @@ class ConversationController
             $otherIds[] = (int)$conv['other_id'];
         }
         $onlineMap = PresenceService::onlineMap($config, $otherIds);
+        $unreadCounts = MessageReceiptService::unreadCounts($config, (int)$user['id']);
+        $unreadMap = $unreadCounts['by_conversation'] ?? [];
 
         foreach ($directs as &$conv) {
             $conv['id'] = (int)$conv['id'];
             $conv['other_id'] = (int)$conv['other_id'];
             $conv['other_photo'] = $conv['other_photo'] !== null ? (int)$conv['other_photo'] : null;
             $conv['other_allow_voice_calls'] = (int)$conv['other_allow_voice_calls'] === 1;
+            $conv['unread_count'] = (int)($unreadMap[$conv['id']] ?? 0);
             $isOnline = isset($onlineMap[$conv['other_id']]);
             $status = LastSeenService::statusFor(
                 $conv['other_last_seen_at'] ?? null,

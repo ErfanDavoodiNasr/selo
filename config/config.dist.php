@@ -42,15 +42,24 @@ return [
         'ping_interval_seconds' => 15,
         'last_seen_touch_seconds' => 60,
     ],
+    'reactions' => [
+        'cooldown_seconds' => 2,
+        'rate_limit' => [
+            'max_attempts' => 12,
+            'window_minutes' => 1,
+            'lock_minutes' => 1,
+        ],
+    ],
     'calls' => [
+        'enabled' => true,
         'signaling_url' => 'ws://localhost:3001/ws',
         'signaling_secret' => 'CHANGE_ME',
         'token_ttl_seconds' => 604800,
         'ring_timeout_seconds' => 45,
         'rate_limit' => [
-            'max_attempts' => 6,
+            'max_attempts' => 30,
             'window_minutes' => 1,
-            'lock_minutes' => 2,
+            'lock_minutes' => 1,
         ],
         'ice_servers' => [
             ['urls' => ['stun:stun.l.google.com:19302']],

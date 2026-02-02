@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   KEY `idx_group_created` (`group_id`, `created_at`),
   KEY `idx_sender` (`sender_id`),
   KEY `idx_recipient` (`recipient_id`),
+  KEY `idx_recipient_conv` (`recipient_id`, `conversation_id`, `id`),
   KEY `idx_reply_to` (`reply_to_message_id`),
   KEY `idx_media_id` (`media_id`),
   KEY `idx_created_at` (`created_at`),
@@ -171,6 +172,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}message_receipts` (
   UNIQUE KEY `uniq_message_user_status` (`message_id`, `user_id`, `status`),
   KEY `idx_user_id` (`user_id`),
   KEY `idx_message_id` (`message_id`),
+  KEY `idx_user_status_message` (`user_id`, `status`, `message_id`),
   KEY `idx_id_user` (`id`, `user_id`),
   CONSTRAINT `fk_receipt_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_receipt_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
