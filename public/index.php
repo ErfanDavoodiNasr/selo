@@ -61,6 +61,7 @@ if (strpos($path, $apiPrefix) === 0) {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/style.css">
+    <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/app.css">
     <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/call.css">
 </head>
 <body data-theme="light">
@@ -102,33 +103,43 @@ if (strpos($path, $apiPrefix) === 0) {
         <div id="main-view" class="main-view hidden">
             <aside class="sidebar">
                 <div class="sidebar-header">
-                    <div class="brand-mini">SELO</div>
+                    <button id="sidebar-menu-btn" class="icon-btn menu-btn" title="منو" aria-label="منو">
+                        <span class="material-symbols-rounded">menu</span>
+                    </button>
+                    <div class="sidebar-brand">
+                        <div class="brand-mini">SELO</div>
+                        <div class="brand-subtitle">سلو</div>
+                    </div>
                     <div class="sidebar-actions">
-                        <button id="new-group-btn" class="icon-btn" title="گروه جدید">
+                        <button id="new-group-btn" class="icon-btn" title="گروه جدید" aria-label="گروه جدید">
                             <span class="material-symbols-rounded">group_add</span>
                         </button>
-                        <button id="user-settings-btn" class="icon-btn" title="تنظیمات حساب">
-                            <span class="material-symbols-rounded">settings</span>
-                        </button>
-                        <button id="theme-toggle" class="icon-btn" title="تغییر تم">
+                        <button id="theme-toggle" class="icon-btn" title="تغییر تم" aria-label="تغییر تم">
                             <span class="material-symbols-rounded">dark_mode</span>
                         </button>
                     </div>
+                    <button id="sidebar-profile-btn" class="sidebar-profile" title="پروفایل" aria-label="پروفایل">
+                        <div id="sidebar-profile-avatar" class="avatar">👤</div>
+                    </button>
                 </div>
                 <div class="sidebar-search">
                     <span class="material-symbols-rounded">search</span>
                     <input id="user-search" type="text" placeholder="جستجوی نام کاربری...">
                     <div id="search-results" class="search-results"></div>
                 </div>
+                <div id="unread-notice" class="unread-notice hidden" aria-live="polite">
+                    <span class="unread-count" id="unread-count">0</span>
+                    <span class="unread-text">پیام جدید</span>
+                </div>
                 <div id="chat-list" class="chat-list"></div>
             </aside>
 
             <section class="chat-panel">
                 <div class="chat-header">
-                    <button id="back-to-chats" class="icon-btn mobile-only" title="بازگشت">
+                    <button id="back-to-chats" class="icon-btn mobile-only" title="بازگشت" aria-label="بازگشت">
                         <span class="material-symbols-rounded">arrow_forward</span>
                     </button>
-                    <div class="chat-user">
+                    <div class="chat-user" id="chat-user-header">
                         <div id="chat-user-avatar" class="avatar"></div>
                         <div class="chat-user-meta">
                             <div id="chat-user-name" class="chat-user-name">گفتگو</div>
@@ -137,18 +148,21 @@ if (strpos($path, $apiPrefix) === 0) {
                         </div>
                     </div>
                     <div class="chat-header-actions">
-                        <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی">
+                        <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی" aria-label="تماس صوتی">
                             <span class="material-symbols-rounded">call</span>
                         </button>
-                        <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه">
+                        <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه" aria-label="تنظیمات گروه">
                             <span class="material-symbols-rounded">tune</span>
                         </button>
-                        <button id="info-toggle" class="icon-btn" title="اطلاعات گفتگو">
+                        <button id="info-toggle" class="icon-btn" title="اطلاعات گفتگو" aria-label="اطلاعات گفتگو">
                             <span class="material-symbols-rounded">info</span>
                         </button>
                     </div>
                 </div>
                 <div id="messages" class="messages"></div>
+                <button id="jump-to-bottom" class="jump-to-bottom hidden" title="رفتن به پایین" aria-label="رفتن به پایین">
+                    <span class="material-symbols-rounded">south</span>
+                </button>
                 <div id="attachment-preview" class="attachment-preview hidden"></div>
                 <div id="voice-recorder" class="voice-recorder hidden">
                     <div class="voice-info">
@@ -156,8 +170,8 @@ if (strpos($path, $apiPrefix) === 0) {
                         <span id="voice-timer" class="voice-timer">00:00</span>
                     </div>
                     <div class="voice-actions">
-                        <button id="voice-cancel" class="icon-btn" title="لغو">✖</button>
-                        <button id="voice-stop" class="icon-btn" title="توقف">■</button>
+                        <button id="voice-cancel" class="icon-btn" title="لغو" aria-label="لغو">✖</button>
+                        <button id="voice-stop" class="icon-btn" title="توقف" aria-label="توقف">■</button>
                         <button id="voice-send" class="send-btn small hidden">ارسال</button>
                     </div>
                 </div>
@@ -166,10 +180,10 @@ if (strpos($path, $apiPrefix) === 0) {
                         <span>پاسخ به</span>
                         <div id="reply-preview"></div>
                     </div>
-                    <button id="reply-cancel" class="icon-btn">×</button>
+                    <button id="reply-cancel" class="icon-btn" aria-label="لغو پاسخ">×</button>
                 </div>
                 <div class="composer">
-                    <button id="attach-btn" class="icon-btn" title="پیوست">
+                    <button id="attach-btn" class="icon-btn" title="پیوست" aria-label="پیوست">
                         <span class="material-symbols-rounded">attach_file</span>
                     </button>
                     <div id="attach-menu" class="attach-menu hidden">
@@ -177,17 +191,17 @@ if (strpos($path, $apiPrefix) === 0) {
                         <button type="button" data-type="video">ویدیو</button>
                         <button type="button" data-type="file">فایل</button>
                     </div>
-                    <button id="emoji-btn" class="icon-btn" title="ایموجی">
+                    <button id="emoji-btn" class="icon-btn" title="ایموجی" aria-label="ایموجی">
                         <span class="material-symbols-rounded">sentiment_satisfied</span>
                     </button>
                     <div class="composer-input">
                         <textarea id="message-input" rows="1" placeholder="پیام بنویسید..."></textarea>
                         <div id="emoji-picker" class="emoji-picker hidden"></div>
                     </div>
-                    <button id="voice-btn" class="icon-btn" title="پیام صوتی">
+                    <button id="voice-btn" class="icon-btn" title="پیام صوتی" aria-label="پیام صوتی">
                         <span class="material-symbols-rounded">mic</span>
                     </button>
-                    <button id="send-btn" class="send-btn" title="ارسال">
+                    <button id="send-btn" class="send-btn" title="ارسال" aria-label="ارسال">
                         <span class="material-symbols-rounded">send</span>
                     </button>
                 </div>
@@ -199,7 +213,7 @@ if (strpos($path, $apiPrefix) === 0) {
             <aside id="info-panel" class="info-panel hidden" aria-label="اطلاعات گفتگو">
                 <div class="info-header">
                     <div class="info-title">اطلاعات گفتگو</div>
-                    <button id="info-close" class="icon-btn" title="بستن">
+                    <button id="info-close" class="icon-btn" title="بستن" aria-label="بستن">
                         <span class="material-symbols-rounded">close</span>
                     </button>
                 </div>
@@ -228,11 +242,92 @@ if (strpos($path, $apiPrefix) === 0) {
         </div>
     </div>
 
+    <aside id="profile-panel" class="profile-panel hidden" aria-label="پروفایل">
+        <div class="profile-panel-header">
+            <div class="profile-panel-title">پروفایل</div>
+            <button id="profile-panel-close" class="icon-btn" title="بستن" aria-label="بستن">
+                <span class="material-symbols-rounded">close</span>
+            </button>
+        </div>
+        <div class="profile-panel-body">
+            <div id="profile-panel-avatar" class="profile-panel-avatar">👤</div>
+            <div id="profile-panel-name" class="profile-panel-name">-</div>
+            <div id="profile-panel-username" class="profile-panel-username">-</div>
+            <div id="profile-panel-status" class="profile-panel-status">-</div>
+            <div class="profile-panel-section">
+                <div class="profile-panel-label">درباره</div>
+                <div id="profile-panel-bio" class="profile-panel-value muted">-</div>
+            </div>
+            <div class="profile-panel-section">
+                <div class="profile-panel-label">ایمیل</div>
+                <div id="profile-panel-email" class="profile-panel-value">-</div>
+            </div>
+            <div class="profile-panel-section">
+                <div class="profile-panel-label">شماره تماس</div>
+                <div id="profile-panel-phone" class="profile-panel-value">-</div>
+            </div>
+        </div>
+    </aside>
+
+    <div id="sidebar-menu-overlay" class="menu-overlay hidden"></div>
+    <aside id="sidebar-menu" class="sidebar-menu hidden" aria-label="منوی کاربر">
+        <div class="menu-header">
+            <div id="menu-avatar" class="menu-avatar">👤</div>
+            <div class="menu-user">
+                <div id="menu-user-name" class="menu-user-name">-</div>
+                <div id="menu-user-username" class="menu-user-username">-</div>
+            </div>
+        </div>
+        <div class="menu-items">
+            <button id="user-settings-btn" class="menu-item">
+                <span class="material-symbols-rounded">settings</span>
+                تنظیمات
+            </button>
+            <button id="menu-contacts-btn" class="menu-item">
+                <span class="material-symbols-rounded">person</span>
+                مخاطبین
+            </button>
+            <button id="menu-calls-btn" class="menu-item">
+                <span class="material-symbols-rounded">call</span>
+                تماس‌ها
+            </button>
+            <button id="menu-night-btn" class="menu-item">
+                <span class="material-symbols-rounded">dark_mode</span>
+                حالت شب
+            </button>
+            <button id="menu-logout-btn" class="menu-item danger">
+                <span class="material-symbols-rounded">logout</span>
+                خروج
+            </button>
+        </div>
+    </aside>
+
+    <div id="message-context-menu" class="context-menu hidden" role="menu"></div>
+    <div id="message-action-sheet" class="action-sheet hidden">
+        <div class="sheet">
+            <div class="sheet-handle"></div>
+            <div id="message-action-sheet-list" class="sheet-list"></div>
+            <button id="message-action-sheet-cancel" class="sheet-cancel">لغو</button>
+        </div>
+    </div>
+
+    <div id="delete-confirm-sheet" class="action-sheet hidden">
+        <div class="sheet">
+            <div class="sheet-handle"></div>
+            <div class="sheet-title">حذف پیام</div>
+            <div class="sheet-list">
+                <button id="delete-for-me-btn" class="sheet-item">حذف برای من</button>
+                <button id="delete-for-everyone-btn" class="sheet-item danger">حذف برای همه</button>
+            </div>
+            <button id="delete-cancel-btn" class="sheet-cancel">لغو</button>
+        </div>
+    </div>
+
     <div id="group-modal" class="modal hidden">
         <div class="modal-card">
             <div class="modal-header">
                 <div class="modal-title">گروه جدید</div>
-                <button id="group-modal-close" class="icon-btn">✖</button>
+                <button id="group-modal-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <form id="group-form" class="modal-body">
                 <label>عنوان گروه</label>
@@ -260,7 +355,7 @@ if (strpos($path, $apiPrefix) === 0) {
         <div class="modal-card wide">
             <div class="modal-header">
                 <div class="modal-title">تنظیمات گروه</div>
-                <button id="group-settings-close" class="icon-btn">✖</button>
+                <button id="group-settings-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div class="modal-body">
                 <div class="settings-section">
@@ -273,7 +368,7 @@ if (strpos($path, $apiPrefix) === 0) {
                         <span>لینک دعوت:</span>
                         <div class="invite-wrap">
                             <input id="group-invite-link" type="text" readonly>
-                            <button id="group-invite-copy" type="button" class="icon-btn" title="کپی">📋</button>
+                            <button id="group-invite-copy" type="button" class="icon-btn" title="کپی" aria-label="کپی">📋</button>
                         </div>
                     </div>
                 </div>
@@ -321,7 +416,7 @@ if (strpos($path, $apiPrefix) === 0) {
         <div class="modal-card wide">
             <div class="modal-header">
                 <div class="modal-title">تنظیمات حساب</div>
-                <button id="user-settings-close" class="icon-btn">✖</button>
+                <button id="user-settings-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div class="modal-body">
                 <div class="settings-section">
@@ -330,7 +425,7 @@ if (strpos($path, $apiPrefix) === 0) {
                         <div id="profile-avatar" class="profile-avatar">👤</div>
                         <div class="profile-actions">
                             <button id="profile-photo-change" class="send-btn small" type="button">تغییر عکس</button>
-                            <button id="profile-photo-remove" class="icon-btn" type="button" title="حذف عکس">🗑️</button>
+                            <button id="profile-photo-remove" class="icon-btn" type="button" title="حذف عکس" aria-label="حذف عکس">🗑️</button>
                             <input id="profile-photo-input" type="file" accept="image/*" class="hidden">
                         </div>
                     </div>
@@ -377,16 +472,28 @@ if (strpos($path, $apiPrefix) === 0) {
         <div class="modal-card">
             <div class="modal-header">
                 <div id="reaction-modal-title" class="modal-title">واکنش‌ها</div>
-                <button id="reaction-modal-close" class="icon-btn">✖</button>
+                <button id="reaction-modal-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div id="reaction-modal-list" class="members-list"></div>
+        </div>
+    </div>
+
+    <div id="calls-modal" class="modal hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">تماس‌ها</div>
+                <button id="calls-modal-close" class="icon-btn" aria-label="بستن">✖</button>
+            </div>
+            <div class="modal-body">
+                <div id="calls-list" class="calls-list"></div>
+            </div>
         </div>
     </div>
 
     <div id="lightbox" class="lightbox hidden">
         <div class="lightbox-inner">
             <img id="lightbox-img" alt="preview">
-            <button id="lightbox-close" class="icon-btn">✖</button>
+            <button id="lightbox-close" class="icon-btn" aria-label="بستن">✖</button>
         </div>
     </div>
 
@@ -395,10 +502,12 @@ if (strpos($path, $apiPrefix) === 0) {
     <script>
         window.SELO_CONFIG = {
             baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>',
+            basePath: '<?php echo $basePath; ?>',
             calls: <?php
                 $callConfig = $config['calls'] ?? [];
                 $iceServers = $callConfig['ice_servers'] ?? [['urls' => ['stun:stun.l.google.com:19302']]];
                 $callsPayload = [
+                    'enabled' => isset($callConfig['enabled']) ? (bool)$callConfig['enabled'] : true,
                     'signalingUrl' => $callConfig['signaling_url'] ?? '',
                     'ringTimeoutSeconds' => (int)($callConfig['ring_timeout_seconds'] ?? 45),
                     'iceServers' => $iceServers,

@@ -29,6 +29,11 @@
       seen: new Set(),
       timer: null
     },
+    unread: {
+      total: 0,
+      byConversation: {}
+    },
+    readMarkers: {},
     recording: {
       mediaRecorder: null,
       chunks: [],
@@ -42,6 +47,11 @@
       wsConnected: false,
       wsConnecting: false,
       reconnectTimer: null,
+      reconnectAttempts: 0,
+      lastReconnectLogAt: 0,
+      token: null,
+      tokenExpiresAt: 0,
+      tokenPromise: null,
       session: null,
       pendingCandidates: [],
       pendingOffer: null,
@@ -56,6 +66,11 @@
       muted: false,
       sinkId: null,
       outputDevices: []
+    },
+    ui: {
+      contextMessageId: null,
+      contextMessageEl: null,
+      contextMessageData: null
     }
   };
 
@@ -67,6 +82,8 @@
   const tabs = document.querySelectorAll('.auth-tabs .tab');
 
   const chatList = document.getElementById('chat-list');
+  const unreadNotice = document.getElementById('unread-notice');
+  const unreadCountEl = document.getElementById('unread-count');
   const messagesEl = document.getElementById('messages');
   const messageInput = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
@@ -142,6 +159,40 @@
   const reactionModalTitle = document.getElementById('reaction-modal-title');
   const reactionModalList = document.getElementById('reaction-modal-list');
   const userSettingsBtn = document.getElementById('user-settings-btn');
+  const sidebarMenuBtn = document.getElementById('sidebar-menu-btn');
+  const sidebarMenu = document.getElementById('sidebar-menu');
+  const sidebarMenuOverlay = document.getElementById('sidebar-menu-overlay');
+  const sidebarProfileBtn = document.getElementById('sidebar-profile-btn');
+  const sidebarProfileAvatar = document.getElementById('sidebar-profile-avatar');
+  const chatUserHeader = document.getElementById('chat-user-header');
+  const menuAvatar = document.getElementById('menu-avatar');
+  const menuUserName = document.getElementById('menu-user-name');
+  const menuUserUsername = document.getElementById('menu-user-username');
+  const menuContactsBtn = document.getElementById('menu-contacts-btn');
+  const menuCallsBtn = document.getElementById('menu-calls-btn');
+  const menuNightBtn = document.getElementById('menu-night-btn');
+  const menuLogoutBtn = document.getElementById('menu-logout-btn');
+  const profilePanel = document.getElementById('profile-panel');
+  const profilePanelClose = document.getElementById('profile-panel-close');
+  const profilePanelAvatar = document.getElementById('profile-panel-avatar');
+  const profilePanelName = document.getElementById('profile-panel-name');
+  const profilePanelUsername = document.getElementById('profile-panel-username');
+  const profilePanelStatus = document.getElementById('profile-panel-status');
+  const profilePanelBio = document.getElementById('profile-panel-bio');
+  const profilePanelEmail = document.getElementById('profile-panel-email');
+  const profilePanelPhone = document.getElementById('profile-panel-phone');
+  const messageContextMenu = document.getElementById('message-context-menu');
+  const messageActionSheet = document.getElementById('message-action-sheet');
+  const messageActionSheetList = document.getElementById('message-action-sheet-list');
+  const messageActionSheetCancel = document.getElementById('message-action-sheet-cancel');
+  const deleteConfirmSheet = document.getElementById('delete-confirm-sheet');
+  const deleteForMeBtn = document.getElementById('delete-for-me-btn');
+  const deleteForEveryoneBtn = document.getElementById('delete-for-everyone-btn');
+  const deleteCancelBtn = document.getElementById('delete-cancel-btn');
+  const jumpToBottom = document.getElementById('jump-to-bottom');
+  const callsModal = document.getElementById('calls-modal');
+  const callsModalClose = document.getElementById('calls-modal-close');
+  const callsList = document.getElementById('calls-list');
   const userSettingsModal = document.getElementById('user-settings-modal');
   const userSettingsClose = document.getElementById('user-settings-close');
   const allowVoiceCallsToggle = document.getElementById('allow-voice-calls-toggle');
@@ -170,10 +221,26 @@
   const callSpeakerBtn = document.getElementById('call-speaker-btn');
   const remoteAudio = document.getElementById('remote-audio');
 
-  const apiBase = window.SELO_CONFIG?.baseUrl || '';
-  const baseUrl = apiBase.replace(/\/$/, '');
+  const cfg = window.SELO_CONFIG || {};
+  const apiBase = cfg.baseUrl || '';
+  const basePath = (cfg.basePath || '').replace(/\/$/, '');
+  const origin = window.location.origin || '';
+  const baseUrl = (() => {
+    if (apiBase) {
+      try {
+        const resolved = new URL(apiBase, origin || undefined);
+        if (origin && resolved.origin !== origin) {
+          return origin + basePath;
+        }
+        return resolved.origin + resolved.pathname.replace(/\/$/, '');
+      } catch (err) {
+        return apiBase.replace(/\/$/, '');
+      }
+    }
+    return origin ? origin + basePath : basePath;
+  })();
   const makeUrl = (path) => (baseUrl ? baseUrl + path : path);
-  const appUrl = () => (baseUrl || window.location.origin || '');
+  const appUrl = () => (baseUrl || origin || '');
   const API = {
     login: '/api/login',
     register: '/api/register',
@@ -181,8 +248,11 @@
     meSettings: '/api/me/settings',
     usersSearch: '/api/users/search',
     conversations: '/api/conversations',
+    unreadCount: '/api/unread-count',
     messages: '/api/messages',
     messageAck: '/api/messages/ack',
+    messageMarkRead: '/api/messages/mark-read',
+    messageStatus: '/api/messages/status',
     messageReaction: (id) => `/api/messages/${id}/reaction`,
     messageReactions: (id) => `/api/messages/${id}/reactions`,
     messageReactionsByEmoji: (id, emoji) => `/api/messages/${id}/reactions?emoji=${encodeURIComponent(emoji)}`,
@@ -211,19 +281,61 @@
   const allowedReactions = ['😂', '😜', '👍', '😘', '😁', '🤣', '😍', '🥰', '🤩', '😐', '😑', '🙄', '😬', '🤮', '😎', '🥳', '👎', '🙏'];
 
   function deriveSignalingUrl() {
-    const base = appUrl();
+    const base = appUrl() || window.location.origin;
     if (!base) return '';
-    return base.replace(/^http/i, 'ws').replace(/\/$/, '') + '/ws';
+    let url = null;
+    try {
+      url = new URL(base, window.location.origin);
+    } catch (err) {
+      url = null;
+    }
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = url ? url.host : window.location.host;
+    const basePath = (window.SELO_CONFIG?.basePath || (url ? url.pathname : '') || '').replace(/\/$/, '');
+    return `${proto}//${host}${basePath}/ws`;
+  }
+
+  function normalizeSignalingUrl(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return '';
+    const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (raw.startsWith('/')) {
+      return `${wsProto}//${window.location.host}${raw}`;
+    }
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      try {
+        const url = new URL(raw);
+        url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+        return url.toString();
+      } catch (err) {
+        return raw;
+      }
+    }
+    if (raw.startsWith('ws://') || raw.startsWith('wss://')) {
+      try {
+        const url = new URL(raw);
+        if (window.location.protocol === 'https:' && url.protocol === 'ws:' && url.host === window.location.host) {
+          url.protocol = 'wss:';
+          return url.toString();
+        }
+      } catch (err) {
+        return raw;
+      }
+      return raw;
+    }
+    return raw;
   }
 
   const callConfig = (() => {
     const cfg = window.SELO_CONFIG?.calls || {};
-    const signalingUrl = cfg.signalingUrl || deriveSignalingUrl();
+    const enabled = cfg.enabled !== false;
+    const raw = typeof cfg.signalingUrl === 'string' ? cfg.signalingUrl.trim() : cfg.signalingUrl;
+    const signalingUrl = raw === '' ? '' : normalizeSignalingUrl(raw || deriveSignalingUrl());
     const ringTimeoutSeconds = Number(cfg.ringTimeoutSeconds || 45);
     const iceServers = Array.isArray(cfg.iceServers) && cfg.iceServers.length
       ? cfg.iceServers
       : [{ urls: ['stun:stun.l.google.com:19302'] }];
-    return { signalingUrl, ringTimeoutSeconds, iceServers };
+    return { enabled, signalingUrl, ringTimeoutSeconds, iceServers };
   })();
 
   function formatBytes(bytes) {
@@ -515,6 +627,12 @@
     state.call.outputDevices = [];
   }
 
+  function clearCallToken() {
+    state.call.token = null;
+    state.call.tokenExpiresAt = 0;
+    state.call.tokenPromise = null;
+  }
+
   function finalizeCall(status) {
     if (!state.call.session) return;
     setCallStatus(status);
@@ -526,14 +644,39 @@
   }
 
   async function fetchCallToken(payload = null) {
-    const res = await apiFetch(API.callsToken, { method: 'POST', body: payload || {} });
-    if (!res.data.ok) {
-      const message = res.data.message || res.data.error || 'خطا در دریافت توکن تماس';
-      const err = new Error(message);
-      err.code = res.data.error || '';
-      throw err;
+    const now = Date.now();
+    if (!payload && state.call.token && state.call.tokenExpiresAt > now + 5000) {
+      return state.call.token;
     }
-    return res.data.data.token;
+    if (!payload && state.call.tokenPromise) {
+      return state.call.tokenPromise;
+    }
+    const request = (async () => {
+      const res = await apiFetch(API.callsToken, { method: 'POST', body: payload || {} });
+      if (!res.data.ok) {
+        const message = res.data.message || res.data.error || 'خطا در دریافت توکن تماس';
+        const err = new Error(message);
+        err.code = res.data.error || '';
+        throw err;
+      }
+      const token = res.data.data.token;
+      const ttlSeconds = Number(res.data.data.expires_in || 120);
+      if (!payload) {
+        state.call.token = token;
+        state.call.tokenExpiresAt = Date.now() + ttlSeconds * 1000;
+      }
+      return token;
+    })();
+    if (!payload) {
+      state.call.tokenPromise = request;
+    }
+    try {
+      return await request;
+    } finally {
+      if (!payload) {
+        state.call.tokenPromise = null;
+      }
+    }
   }
 
   function waitForSignalingReady(timeoutMs = 6000) {
@@ -555,6 +698,7 @@
   }
 
   async function connectSignaling() {
+    if (!callConfig.enabled) return;
     if (state.call.wsConnecting || state.call.wsConnected || !callConfig.signalingUrl || !state.token) return;
     state.call.wsConnecting = true;
     try {
@@ -566,9 +710,11 @@
       });
       ws.addEventListener('message', handleSignalingMessage);
       ws.addEventListener('close', handleSignalingClose);
-      ws.addEventListener('error', () => {});
+      ws.addEventListener('error', () => {
+        scheduleSignalingReconnect('error');
+      });
     } catch (err) {
-      // Silent connect failure; UI will show when call is attempted
+      scheduleSignalingReconnect('connect_error');
     } finally {
       state.call.wsConnecting = false;
     }
@@ -589,15 +735,11 @@
 
   function handleSignalingClose() {
     state.call.wsConnected = false;
+    state.call.ws = null;
     if (state.call.session) {
       finalizeCall('failed');
     }
-    if (!state.call.reconnectTimer && state.token) {
-      state.call.reconnectTimer = setTimeout(() => {
-        state.call.reconnectTimer = null;
-        connectSignaling();
-      }, 2000);
-    }
+    scheduleSignalingReconnect('close');
   }
 
   function handleSignalingMessage(event) {
@@ -610,6 +752,8 @@
     if (!msg || !msg.type) return;
     if (msg.type === 'join_ok') {
       state.call.wsConnected = true;
+      state.call.reconnectAttempts = 0;
+      state.call.lastReconnectLogAt = 0;
       return;
     }
     switch (msg.type) {
@@ -649,6 +793,25 @@
       default:
         break;
     }
+  }
+
+  function scheduleSignalingReconnect(reason) {
+    if (!callConfig.enabled || !state.token || !callConfig.signalingUrl) return;
+    if (state.call.reconnectTimer) return;
+    const attempt = Math.min((state.call.reconnectAttempts || 0) + 1, 8);
+    state.call.reconnectAttempts = attempt;
+    const baseDelay = Math.min(30000, 800 * Math.pow(2, attempt - 1));
+    const jitter = Math.floor(Math.random() * 700);
+    const delay = baseDelay + jitter;
+    const now = Date.now();
+    if (!state.call.lastReconnectLogAt || (now - state.call.lastReconnectLogAt) > 5000) {
+      console.warn('signaling_reconnect', { attempt, delay, reason });
+      state.call.lastReconnectLogAt = now;
+    }
+    state.call.reconnectTimer = setTimeout(() => {
+      state.call.reconnectTimer = null;
+      connectSignaling();
+    }, delay);
   }
 
   function handleCallFailed(msg) {
@@ -844,8 +1007,8 @@
       alert('در حال تماس هستید.');
       return;
     }
-    if (!callConfig.signalingUrl) {
-      alert('سیگنالینگ تماس تنظیم نشده است.');
+    if (!callConfig.enabled || !callConfig.signalingUrl) {
+      alert('سرویس تماس فعال نیست.');
       return;
     }
     if (!peerAllowsCalls(state.currentConversation)) {
@@ -1014,7 +1177,7 @@
     return bar;
   }
 
-  function buildReactionChips(messageId, reactions, currentReaction) {
+  function buildReactionChips(messageId, reactions, currentReaction, animate = false) {
     if (!reactions || reactions.length === 0) return null;
     const wrap = document.createElement('div');
     wrap.className = 'reaction-chips';
@@ -1022,6 +1185,9 @@
       const chip = document.createElement('button');
       chip.type = 'button';
       chip.className = 'reaction-chip';
+      if (animate) {
+        chip.classList.add('pop');
+      }
       if (currentReaction === reaction.emoji) {
         chip.classList.add('active');
       }
@@ -1035,8 +1201,189 @@
     return wrap;
   }
 
+  async function copyMessageText(text) {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch (err) {
+      // fallback below
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  function closeMessageMenus() {
+    if (messageContextMenu) {
+      messageContextMenu.classList.add('hidden');
+      messageContextMenu.innerHTML = '';
+    }
+    if (messageActionSheet) {
+      messageActionSheet.classList.remove('show');
+      messageActionSheet.classList.add('hidden');
+    }
+  }
+
+  function closeDeleteConfirm() {
+    if (!deleteConfirmSheet) return;
+    deleteConfirmSheet.classList.remove('show');
+    deleteConfirmSheet.classList.add('hidden');
+    state.ui.contextMessageId = null;
+    state.ui.contextMessageEl = null;
+    state.ui.contextMessageData = null;
+  }
+
+  function openDeleteConfirm(messageId, element, msg) {
+    if (!deleteConfirmSheet) return;
+    state.ui.contextMessageId = messageId;
+    state.ui.contextMessageEl = element;
+    state.ui.contextMessageData = msg || null;
+    deleteConfirmSheet.classList.remove('hidden');
+    requestAnimationFrame(() => deleteConfirmSheet.classList.add('show'));
+  }
+
+  function getMessageMediaItems(msg) {
+    const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+    const fallback = msg.media ? [msg.media] : [];
+    return attachments.length ? attachments : fallback;
+  }
+
+  function buildMessageActions(msg, element) {
+    const actions = [];
+    actions.push({
+      id: 'reply',
+      label: 'پاسخ',
+      icon: 'reply',
+      handler: () => {
+        setReply(msg);
+      }
+    });
+
+    if (msg.body && msg.type === 'text') {
+      actions.push({
+        id: 'copy',
+        label: 'کپی متن',
+        icon: 'content_copy',
+        handler: async () => {
+          await copyMessageText(msg.body);
+        }
+      });
+    }
+
+    const mediaItems = getMessageMediaItems(msg);
+    const hasPhotoOrVideo = mediaItems.some(att => att.type === 'photo' || att.type === 'video');
+    const hasFile = mediaItems.some(att => !['photo', 'video', 'voice'].includes(att.type));
+    if (hasPhotoOrVideo) {
+      const target = mediaItems.find(att => att.type === 'photo' || att.type === 'video');
+      if (target) {
+        actions.push({
+          id: 'save',
+          label: 'ذخیره در گالری',
+          icon: 'image',
+          handler: () => {
+            window.open(makeUrl(API.mediaDownload(target.id)), '_blank');
+          }
+        });
+      }
+    }
+    if (hasFile) {
+      const target = mediaItems.find(att => !['photo', 'video', 'voice'].includes(att.type));
+      if (target) {
+        actions.push({
+          id: 'download',
+          label: 'دانلود',
+          icon: 'download',
+          handler: () => {
+            window.open(makeUrl(API.mediaDownload(target.id)), '_blank');
+          }
+        });
+      }
+    }
+
+    actions.push({
+      id: 'delete',
+      label: 'حذف',
+      icon: 'delete',
+      danger: true,
+      handler: () => {
+        openDeleteConfirm(msg.id, element, msg);
+      }
+    });
+
+    return actions;
+  }
+
+  function openMessageContextMenu(messageId, element, msg, x, y) {
+    if (!messageContextMenu) return;
+    closeMessageMenus();
+    const actions = buildMessageActions(msg, element);
+    messageContextMenu.innerHTML = '';
+    actions.forEach(action => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      if (action.danger) btn.classList.add('danger');
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-rounded';
+      icon.textContent = action.icon;
+      btn.appendChild(icon);
+      btn.appendChild(document.createTextNode(action.label));
+      btn.addEventListener('click', async () => {
+        closeMessageMenus();
+        await action.handler();
+      });
+      messageContextMenu.appendChild(btn);
+    });
+    messageContextMenu.classList.remove('hidden');
+    const menuRect = messageContextMenu.getBoundingClientRect();
+    const maxX = window.innerWidth - menuRect.width - 8;
+    const maxY = window.innerHeight - menuRect.height - 8;
+    const posX = Math.min(maxX, Math.max(8, x));
+    const posY = Math.min(maxY, Math.max(8, y));
+    messageContextMenu.style.left = posX + 'px';
+    messageContextMenu.style.top = posY + 'px';
+  }
+
+  function openMessageActionSheet(messageId, element, msg) {
+    if (!messageActionSheet || !messageActionSheetList) return;
+    closeMessageMenus();
+    const actions = buildMessageActions(msg, element);
+    messageActionSheetList.innerHTML = '';
+    actions.forEach(action => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sheet-item' + (action.danger ? ' danger' : '');
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-rounded';
+      icon.textContent = action.icon;
+      btn.appendChild(icon);
+      btn.appendChild(document.createTextNode(action.label));
+      btn.addEventListener('click', async () => {
+        closeMessageMenus();
+        await action.handler();
+      });
+      messageActionSheetList.appendChild(btn);
+    });
+    messageActionSheet.classList.remove('hidden');
+    requestAnimationFrame(() => messageActionSheet.classList.add('show'));
+  }
+
   async function toggleReaction(messageId, emoji) {
     const messageEl = document.getElementById(`msg-${messageId}`);
+    if (messageEl?.dataset.reactionBusy === '1') return;
+    if (messageEl) {
+      messageEl.dataset.reactionBusy = '1';
+    }
     const current = messageEl?.dataset.currentReaction || '';
     try {
       if (current === emoji) {
@@ -1050,6 +1397,10 @@
       }
     } catch (err) {
       alert(err.message || 'خطا در واکنش پیام');
+    } finally {
+      if (messageEl) {
+        messageEl.dataset.reactionBusy = '0';
+      }
     }
   }
 
@@ -1068,7 +1419,7 @@
     }
     const oldChips = messageEl.querySelector('.reaction-chips');
     if (oldChips) oldChips.remove();
-    const chips = buildReactionChips(messageId, info.reactions, info.current_user_reaction);
+    const chips = buildReactionChips(messageId, info.reactions, info.current_user_reaction, true);
     if (chips) {
       messageEl.appendChild(chips);
     }
@@ -1104,11 +1455,12 @@
     openModal(reactionModal);
   }
 
-  function attachReactionLongPress(messageEl) {
+  function attachMessageLongPress(messageEl, msg) {
     let timer = null;
-    messageEl.addEventListener('touchstart', () => {
+    messageEl.addEventListener('touchstart', (e) => {
+      if (e.target.closest('.reaction-bar') || e.target.closest('.reaction-chip')) return;
       timer = setTimeout(() => {
-        messageEl.classList.add('show-reactions');
+        openMessageActionSheet(msg.id, messageEl, msg);
       }, 400);
     }, { passive: true });
     messageEl.addEventListener('touchend', () => {
@@ -1122,7 +1474,6 @@
         clearTimeout(timer);
         timer = null;
       }
-      messageEl.classList.remove('show-reactions');
     }, { passive: true });
   }
 
@@ -1161,12 +1512,139 @@
     localStorage.setItem('selo_theme', theme);
   }
 
+  function openSidebarMenu() {
+    if (!sidebarMenu || !sidebarMenuOverlay) return;
+    syncSidebarProfile();
+    sidebarMenu.classList.add('show');
+    sidebarMenuOverlay.classList.add('show');
+    sidebarMenu.classList.remove('hidden');
+    sidebarMenuOverlay.classList.remove('hidden');
+  }
+
+  function closeSidebarMenu() {
+    if (!sidebarMenu || !sidebarMenuOverlay) return;
+    sidebarMenu.classList.remove('show');
+    sidebarMenuOverlay.classList.remove('show');
+    setTimeout(() => {
+      if (!sidebarMenu.classList.contains('show')) {
+        sidebarMenu.classList.add('hidden');
+        sidebarMenuOverlay.classList.add('hidden');
+      }
+    }, 160);
+  }
+
+  function openProfilePanel() {
+    if (!profilePanel) return;
+    setInfoPanelVisible(false);
+    populateProfilePanel();
+    profilePanel.classList.remove('hidden');
+    document.body.classList.add('show-profile');
+  }
+
+  function closeProfilePanel() {
+    document.body.classList.remove('show-profile');
+    if (profilePanel) {
+      setTimeout(() => {
+        if (!document.body.classList.contains('show-profile')) {
+          profilePanel.classList.add('hidden');
+        }
+      }, 160);
+    }
+  }
+
+  function populateProfilePanel() {
+    if (!state.me) return;
+    const avatarUrl = state.me.active_photo_id ? makeUrl('/photo.php?id=' + state.me.active_photo_id + '&thumb=1') : '';
+    const initial = (state.me.full_name || '👤').trim().slice(0, 1) || '👤';
+    if (profilePanelAvatar) {
+      if (avatarUrl) {
+        profilePanelAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        profilePanelAvatar.textContent = '';
+      } else {
+        profilePanelAvatar.style.backgroundImage = '';
+        profilePanelAvatar.textContent = initial;
+      }
+    }
+    if (profilePanelName) profilePanelName.textContent = state.me.full_name || '—';
+    if (profilePanelUsername) profilePanelUsername.textContent = state.me.username ? '@' + state.me.username : '';
+    if (profilePanelStatus) profilePanelStatus.textContent = 'آنلاین';
+    if (profilePanelBio) profilePanelBio.textContent = state.me.bio || '—';
+    if (profilePanelEmail) profilePanelEmail.textContent = state.me.email || '—';
+    if (profilePanelPhone) profilePanelPhone.textContent = state.me.phone || '—';
+  }
+
+  function syncSidebarProfile() {
+    if (!state.me) return;
+    const avatarUrl = state.me.active_photo_id ? makeUrl('/photo.php?id=' + state.me.active_photo_id + '&thumb=1') : '';
+    const initial = (state.me.full_name || '👤').trim().slice(0, 1) || '👤';
+    if (sidebarProfileAvatar) {
+      if (avatarUrl) {
+        sidebarProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        sidebarProfileAvatar.textContent = '';
+      } else {
+        sidebarProfileAvatar.style.backgroundImage = '';
+        sidebarProfileAvatar.textContent = initial;
+      }
+    }
+    if (menuAvatar) {
+      if (avatarUrl) {
+        menuAvatar.style.backgroundImage = `url(${avatarUrl})`;
+        menuAvatar.textContent = '';
+      } else {
+        menuAvatar.style.backgroundImage = '';
+        menuAvatar.textContent = initial;
+      }
+    }
+    if (menuUserName) menuUserName.textContent = state.me.full_name || '';
+    if (menuUserUsername) menuUserUsername.textContent = state.me.username ? '@' + state.me.username : '';
+  }
+
+  function isMobileLayout() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
   const savedTheme = localStorage.getItem('selo_theme') || 'light';
   setTheme(savedTheme);
 
   themeToggle.addEventListener('click', () => {
     const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
+  });
+
+  sidebarMenuBtn?.addEventListener('click', openSidebarMenu);
+  sidebarMenuOverlay?.addEventListener('click', closeSidebarMenu);
+  sidebarProfileBtn?.addEventListener('click', () => {
+    closeSidebarMenu();
+    openProfilePanel();
+  });
+  menuAvatar?.addEventListener('click', () => {
+    closeSidebarMenu();
+    openProfilePanel();
+  });
+  profilePanelClose?.addEventListener('click', closeProfilePanel);
+
+  menuNightBtn?.addEventListener('click', () => {
+    const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+    closeSidebarMenu();
+  });
+
+  menuContactsBtn?.addEventListener('click', () => {
+    closeSidebarMenu();
+    document.body.classList.add('show-chats');
+    userSearch?.focus();
+  });
+
+  menuCallsBtn?.addEventListener('click', async () => {
+    closeSidebarMenu();
+    await openCallsModal();
+  });
+
+  menuLogoutBtn?.addEventListener('click', () => {
+    localStorage.removeItem('selo_token');
+    state.token = null;
+    clearCallToken();
+    location.reload();
   });
 
   infoToggle?.addEventListener('click', () => {
@@ -1176,13 +1654,27 @@
     updateInfoPanel();
   });
 
+  chatUserHeader?.addEventListener('click', () => {
+    if (!state.currentConversation) return;
+    setInfoPanelVisible(true);
+    updateInfoPanel();
+  });
+
   infoClose?.addEventListener('click', () => {
     setInfoPanelVisible(false);
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.body.classList.contains('show-info')) {
-      setInfoPanelVisible(false);
+    if (e.key === 'Escape') {
+      if (document.body.classList.contains('show-info')) {
+        setInfoPanelVisible(false);
+      }
+      if (document.body.classList.contains('show-profile')) {
+        closeProfilePanel();
+      }
+      closeMessageMenus();
+      closeDeleteConfirm();
+      closeSidebarMenu();
     }
   });
 
@@ -1192,12 +1684,29 @@
     setInfoPanelVisible(false);
   });
 
+  document.addEventListener('click', (e) => {
+    if (!document.body.classList.contains('show-profile') || !profilePanel || !sidebarProfileBtn) return;
+    if (profilePanel.contains(e.target) || sidebarProfileBtn.contains(e.target)) return;
+    closeProfilePanel();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (messageContextMenu && !messageContextMenu.contains(e.target)) {
+      closeMessageMenus();
+    }
+  });
+
+  window.addEventListener('resize', closeMessageMenus);
+
   userSettingsBtn?.addEventListener('click', async () => {
+    closeSidebarMenu();
     await refreshMe();
     syncUserSettingsUI();
     populateProfileForm();
     openModal(userSettingsModal);
   });
+
+  callsModalClose?.addEventListener('click', () => closeModal(callsModal));
 
   profileSaveBtn?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -1274,6 +1783,32 @@
   groupSettingsClose?.addEventListener('click', () => closeModal(groupSettingsModal));
   userSettingsClose?.addEventListener('click', () => closeModal(userSettingsModal));
   reactionModalClose?.addEventListener('click', () => closeModal(reactionModal));
+  callsModal?.addEventListener('click', (e) => {
+    if (e.target === callsModal) closeModal(callsModal);
+  });
+  messageActionSheetCancel?.addEventListener('click', closeMessageMenus);
+  messageActionSheet?.addEventListener('click', (e) => {
+    if (e.target === messageActionSheet) closeMessageMenus();
+  });
+  deleteCancelBtn?.addEventListener('click', closeDeleteConfirm);
+  deleteConfirmSheet?.addEventListener('click', (e) => {
+    if (e.target === deleteConfirmSheet) closeDeleteConfirm();
+  });
+
+  deleteForMeBtn?.addEventListener('click', async () => {
+    if (!state.ui.contextMessageId) return;
+    const messageId = state.ui.contextMessageId;
+    closeDeleteConfirm();
+    await deleteForMe(messageId);
+  });
+
+  deleteForEveryoneBtn?.addEventListener('click', async () => {
+    if (!state.ui.contextMessageId) return;
+    const messageId = state.ui.contextMessageId;
+    const element = state.ui.contextMessageEl;
+    closeDeleteConfirm();
+    await deleteForEveryone(messageId, element);
+  });
 
   groupModal?.addEventListener('click', (e) => {
     if (e.target === groupModal) closeModal(groupModal);
@@ -1329,6 +1864,9 @@
     authView.classList.remove('hidden');
     mainView.classList.add('hidden');
     setInfoPanelVisible(false);
+    closeProfilePanel();
+    closeSidebarMenu();
+    closeMessageMenus();
   }
 
   function showMain() {
@@ -1567,6 +2105,61 @@
     }, 1200);
   }
 
+  function updateUnreadUI() {
+    if (!unreadNotice || !unreadCountEl) return;
+    const total = Number(state.unread.total || 0);
+    unreadCountEl.textContent = total > 99 ? '99+' : String(total);
+    unreadNotice.classList.toggle('hidden', total <= 0);
+  }
+
+  function applyUnreadCounts(total, byConversation = {}, rerender = true) {
+    state.unread.total = Number(total || 0);
+    state.unread.byConversation = byConversation || {};
+    updateUnreadUI();
+    if (rerender && state.conversations.length) {
+      state.conversations.forEach((conv) => {
+        if (conv.chat_type !== 'direct') return;
+        conv.unread_count = Number(state.unread.byConversation[conv.id] || 0);
+      });
+      renderConversations();
+    }
+  }
+
+  function syncUnreadFromConversations() {
+    const map = {};
+    let total = 0;
+    state.conversations.forEach((conv) => {
+      if (conv.chat_type !== 'direct') return;
+      const count = Number(conv.unread_count || conv.unread || 0);
+      if (count > 0) {
+        map[conv.id] = count;
+        total += count;
+      }
+    });
+    applyUnreadCounts(total, map, false);
+  }
+
+  async function fetchUnreadCount() {
+    if (!state.token) return;
+    try {
+      const res = await apiFetch(API.unreadCount);
+      if (res.data && res.data.ok) {
+        const payload = res.data.data || {};
+        applyUnreadCounts(payload.total_unread || 0, payload.by_conversation || {});
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  function incrementUnread(conversationId) {
+    if (!conversationId) return;
+    const current = state.unread.byConversation[conversationId] || 0;
+    state.unread.byConversation[conversationId] = current + 1;
+    state.unread.total = Math.max(0, (state.unread.total || 0) + 1);
+    updateUnreadUI();
+  }
+
   function isCurrentMessage(msg) {
     if (!state.currentConversation) return false;
     if (state.currentConversation.chat_type === 'group') {
@@ -1579,12 +2172,20 @@
     if (!msg || !msg.id) return;
     state.realtime.lastMessageId = Math.max(state.realtime.lastMessageId, msg.id);
     const isCurrent = isCurrentMessage(msg);
+    const wasAtBottom = isAtBottom();
     if (isCurrent) {
       renderMessages([msg], false);
       queueReceipt([msg.id], 'delivered');
-      markSeenForVisible();
+      if (wasAtBottom) {
+        markSeenForVisible();
+      } else if (msg.sender_id !== state.me.id && msg.conversation_id) {
+        incrementUnread(msg.conversation_id);
+      }
     } else if (msg.sender_id !== state.me.id) {
       queueReceipt([msg.id], 'delivered');
+      if (msg.conversation_id) {
+        incrementUnread(msg.conversation_id);
+      }
     }
     scheduleConversationsRefresh();
   }
@@ -1738,6 +2339,7 @@
       }
       state.token = res.data.data.token;
       localStorage.setItem('selo_token', state.token);
+      clearCallToken();
       await initialize();
     } catch (err) {
       authError.textContent = err.message;
@@ -1860,6 +2462,8 @@
       state.me = res.data.data.user;
       state.profilePhotos = res.data.data.photos || [];
       syncUserSettingsUI();
+      syncSidebarProfile();
+      populateProfilePanel();
     }
   }
 
@@ -2183,6 +2787,9 @@
     if (!infoPanel) return;
     infoPanel.classList.toggle('hidden', !visible);
     document.body.classList.toggle('show-info', visible);
+    if (visible) {
+      closeProfilePanel();
+    }
   }
 
   function updateInfoPanel() {
@@ -2288,10 +2895,10 @@
     if (audioCallBtn) {
       audioCallBtn.classList.remove('hidden');
       const allowed = peerAllowsCalls(conversation);
-      const canCall = !!callConfig.signalingUrl && allowed;
+      const canCall = !!callConfig.enabled && !!callConfig.signalingUrl && allowed;
       toggleButton(audioCallBtn, canCall);
-      if (!callConfig.signalingUrl) {
-        audioCallBtn.title = 'سیگنالینگ تماس تنظیم نشده است.';
+      if (!callConfig.enabled || !callConfig.signalingUrl) {
+        audioCallBtn.title = 'سرویس تماس فعال نیست.';
       } else if (!allowed) {
         audioCallBtn.title = 'این کاربر تماس صوتی را غیرفعال کرده است.';
       } else {
@@ -2380,10 +2987,55 @@
         }
       }
       renderConversations();
+      syncUnreadFromConversations();
       if (state.currentConversation) {
         setCurrentChatHeader(state.currentConversation);
       }
     }
+  }
+
+  async function openCallsModal() {
+    if (!callsModal || !callsList) return;
+    callsList.innerHTML = '';
+    if (!state.currentConversation || state.currentConversation.chat_type !== 'direct') {
+      callsList.textContent = 'تماسی برای نمایش وجود ندارد.';
+      openModal(callsModal);
+      return;
+    }
+    const params = new URLSearchParams({ conversation_id: state.currentConversation.id });
+    const res = await apiFetch(API.callsHistory + '?' + params.toString());
+    if (!res.data.ok) {
+      callsList.textContent = 'خطا در دریافت تاریخچه تماس.';
+      openModal(callsModal);
+      return;
+    }
+    const items = res.data.data || [];
+    if (!items.length) {
+      callsList.textContent = 'تماسی برای نمایش وجود ندارد.';
+      openModal(callsModal);
+      return;
+    }
+    items.forEach((call) => {
+      const row = document.createElement('div');
+      row.className = 'call-item';
+      const icon = document.createElement('span');
+      icon.className = 'material-symbols-rounded';
+      icon.textContent = call.direction === 'incoming' ? 'call_received' : 'call_made';
+      const meta = document.createElement('div');
+      meta.className = 'call-meta';
+      const title = document.createElement('div');
+      title.className = 'call-title';
+      title.textContent = call.direction === 'incoming' ? 'تماس ورودی' : 'تماس خروجی';
+      const time = document.createElement('div');
+      time.className = 'call-time';
+      time.textContent = formatTime(call.started_at);
+      meta.appendChild(title);
+      meta.appendChild(time);
+      row.appendChild(icon);
+      row.appendChild(meta);
+      callsList.appendChild(row);
+    });
+    openModal(callsModal);
   }
 
   function parseUsernames(value) {
@@ -2565,6 +3217,9 @@
     player.appendChild(playBtn);
     player.appendChild(progress);
     player.appendChild(duration);
+    const dl = createDownloadButton(att, 'ذخیره پیام صوتی');
+    dl.classList.add('media-download-inline');
+    player.appendChild(dl);
     return player;
   }
 
@@ -2588,6 +3243,24 @@
     card.appendChild(icon);
     card.appendChild(meta);
     return card;
+  }
+
+  function openMediaDownload(att) {
+    if (!att || !att.id) return;
+    window.open(makeUrl(API.mediaDownload(att.id)), '_blank');
+  }
+
+  function createDownloadButton(att, title = 'دانلود') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'media-download icon-btn';
+    btn.title = title;
+    btn.innerHTML = '<span class="material-symbols-rounded">download</span>';
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMediaDownload(att);
+    });
+    return btn;
   }
 
   function appendMessageContent(message, msg) {
@@ -2617,25 +3290,40 @@
         const grid = document.createElement('div');
         grid.className = `photo-grid count-${Math.min(photos.length, 6)}`;
         photos.forEach(att => {
+          const item = document.createElement('div');
+          item.className = 'photo-item';
           const img = document.createElement('img');
           const src = att.thumbnail_name ? makeUrl(API.mediaThumb(att.id)) : makeUrl(API.media(att.id));
           img.src = src;
           img.alt = att.original_name || 'photo';
           img.addEventListener('click', () => {
             lightboxImg.src = makeUrl(API.media(att.id));
+            if (lightboxImg) {
+              lightboxImg.dataset.mediaId = String(att.id);
+            }
             lightbox.classList.remove('hidden');
           });
-          grid.appendChild(img);
+          const dl = createDownloadButton(att, 'ذخیره عکس');
+          dl.classList.add('media-download-overlay');
+          item.appendChild(img);
+          item.appendChild(dl);
+          grid.appendChild(item);
         });
         mediaWrap.appendChild(grid);
       }
 
       videos.forEach(att => {
+        const wrap = document.createElement('div');
+        wrap.className = 'video-wrap';
         const video = document.createElement('video');
         video.src = makeUrl(API.media(att.id));
         video.controls = true;
         video.playsInline = true;
-        mediaWrap.appendChild(video);
+        const dl = createDownloadButton(att, 'ذخیره ویدیو');
+        dl.classList.add('media-download-inline');
+        wrap.appendChild(video);
+        wrap.appendChild(dl);
+        mediaWrap.appendChild(wrap);
       });
 
       voices.forEach(att => {
@@ -2658,18 +3346,13 @@
   }
 
   function applyReceiptToTicks(element, receipt) {
-    const status = receipt?.status || 'sent';
-    if (element.classList.contains('seen') && status !== 'seen') {
-      return;
-    }
+    const status = receipt?.status || 'delivered';
     element.classList.remove('seen');
-    if (status === 'sent') {
-      element.textContent = '✓';
-    } else if (status === 'delivered') {
-      element.textContent = '✓✓';
-    } else if (status === 'seen') {
+    if (status === 'seen') {
       element.textContent = '✓✓';
       element.classList.add('seen');
+    } else {
+      element.textContent = '✓';
     }
   }
 
@@ -2703,6 +3386,21 @@
 
       const reactionBar = buildReactionBar(msg.id, msg.current_user_reaction);
       message.appendChild(reactionBar);
+
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'message-more';
+      moreBtn.type = 'button';
+      moreBtn.innerHTML = '<span class="material-symbols-rounded">more_vert</span>';
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rect = moreBtn.getBoundingClientRect();
+        if (isMobileLayout()) {
+          openMessageActionSheet(msg.id, message, msg);
+        } else {
+          openMessageContextMenu(msg.id, message, msg, rect.left, rect.bottom + 6);
+        }
+      });
+      message.appendChild(moreBtn);
 
       if (isGroupChat()) {
         const senderWrap = document.createElement('div');
@@ -2781,7 +3479,16 @@
       }
       message.appendChild(meta);
 
-      attachReactionLongPress(message);
+      message.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (isMobileLayout()) {
+          openMessageActionSheet(msg.id, message, msg);
+          return;
+        }
+        openMessageContextMenu(msg.id, message, msg, e.clientX, e.clientY);
+      });
+
+      attachMessageLongPress(message, msg);
       fragment.appendChild(message);
       inserted.push(message);
     });
@@ -2796,6 +3503,9 @@
       }
     }
     inserted.forEach(updateGroupingAround);
+    if (jumpToBottom) {
+      jumpToBottom.classList.toggle('hidden', isAtBottom());
+    }
   }
 
   function isAtBottom() {
@@ -2830,14 +3540,59 @@
     }
   }
 
+  let markReadTimer = null;
+  function getLastMessageId() {
+    const last = messagesEl.querySelector('.message:last-child');
+    if (!last) return 0;
+    const id = Number(String(last.id || '').replace('msg-', ''));
+    return Number.isFinite(id) ? id : 0;
+  }
+
+  async function markReadForCurrentConversation() {
+    if (!state.currentConversation || !state.me || isGroupChat()) return;
+    if (!isAtBottom()) return;
+    const lastId = getLastMessageId();
+    if (!lastId) return;
+    const convId = state.currentConversation.id;
+    const prev = state.readMarkers[convId] || 0;
+    if (lastId <= prev) return;
+    state.readMarkers[convId] = lastId;
+    try {
+      const res = await apiFetch(API.messageMarkRead, {
+        method: 'POST',
+        body: { conversation_id: convId, up_to_message_id: lastId }
+      });
+      if (res.data && res.data.ok) {
+        const payload = res.data.data || {};
+        if (typeof payload.total_unread !== 'undefined') {
+          applyUnreadCounts(payload.total_unread || 0, payload.by_conversation || {});
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  function scheduleMarkRead() {
+    if (markReadTimer) return;
+    markReadTimer = setTimeout(() => {
+      markReadTimer = null;
+      markReadForCurrentConversation();
+    }, 300);
+  }
+
   function markSeenForVisible() {
     if (!state.currentConversation || !state.me) return;
     if (!isAtBottom()) return;
-    const incoming = Array.from(messagesEl.querySelectorAll('.message.incoming'));
-    const ids = incoming.map(node => Number(node.id.replace('msg-', ''))).filter(Boolean);
-    if (ids.length) {
-      queueReceipt(ids, 'seen');
+    if (isGroupChat()) {
+      const incoming = Array.from(messagesEl.querySelectorAll('.message.incoming'));
+      const ids = incoming.map(node => Number(node.id.replace('msg-', ''))).filter(Boolean);
+      if (ids.length) {
+        queueReceipt(ids, 'seen');
+      }
+      return;
     }
+    scheduleMarkRead();
   }
 
   async function sendMessage() {
@@ -3246,12 +4001,33 @@
     document.body.classList.add('show-chats');
   });
 
+  function syncMobileView() {
+    const isMobile = window.innerWidth <= 900;
+    if (!isMobile) return;
+    if (!state.currentConversation) {
+      document.body.classList.add('show-chats');
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    syncMobileView();
+  });
+
   messagesEl.addEventListener('scroll', () => {
     if (messagesEl.scrollTop === 0 && state.oldestMessageId) {
       loadMessages(state.oldestMessageId);
     }
     markSeenForVisible();
+    if (jumpToBottom) {
+      jumpToBottom.classList.toggle('hidden', isAtBottom());
+    }
+    closeMessageMenus();
   }, { passive: true });
+
+  jumpToBottom?.addEventListener('click', () => {
+    messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
+    markSeenForVisible();
+  });
 
   async function initialize() {
     if (!state.token) {
@@ -3266,10 +4042,14 @@
       state.me = meRes.data.data.user;
       state.profilePhotos = meRes.data.data.photos || [];
       showMain();
+      syncMobileView();
       syncUserSettingsUI();
+      syncSidebarProfile();
+      populateProfilePanel();
       initEmojiPicker();
       connectSignaling();
       await loadConversations();
+      await fetchUnreadCount();
       await handleInviteLink();
       if (!state.currentConversation && state.conversations.length > 0) {
         await selectConversation(state.conversations[0]);
@@ -3277,14 +4057,15 @@
       startRealtime();
       if (!conversationsAutoRefreshTimer) {
         conversationsAutoRefreshTimer = setInterval(() => {
-          if (state.token) {
-            loadConversations();
-          }
-        }, 20000);
+      if (state.token) {
+        loadConversations();
       }
+    }, 20000);
+  }
     } catch (err) {
       localStorage.removeItem('selo_token');
       state.token = null;
+      clearCallToken();
       stopRealtime();
       showAuth();
     }
