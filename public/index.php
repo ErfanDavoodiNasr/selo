@@ -36,25 +36,72 @@ function formatSourceHost(string $host): string
     return $host;
 }
 
+function validatedHostHeader(): ?string
+{
+    $hostHeader = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($hostHeader === '' || !preg_match('/^[A-Za-z0-9.\\-:\\[\\]]+$/', $hostHeader)) {
+        return null;
+    }
+    return $hostHeader;
+}
+
+function cspSourceFromUrl(string $source): ?string
+{
+    $source = trim($source);
+    if ($source === '') {
+        return null;
+    }
+    if ($source === "'self'") {
+        return "'self'";
+    }
+    if (strpos($source, '/') === 0) {
+        return null;
+    }
+    $parsed = @parse_url($source);
+    if (!is_array($parsed) || empty($parsed['host'])) {
+        return null;
+    }
+    $scheme = strtolower((string)($parsed['scheme'] ?? ''));
+    if (!in_array($scheme, ['http', 'https', 'ws', 'wss'], true)) {
+        return null;
+    }
+    $host = formatSourceHost((string)$parsed['host']);
+    $port = isset($parsed['port']) ? ':' . (int)$parsed['port'] : '';
+    return $scheme . '://' . $host . $port;
+}
+
 function cspConnectSources(array $config): array
 {
     $sources = ["'self'"];
-    $hostHeader = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
-    if ($hostHeader !== '' && preg_match('/^[A-Za-z0-9.\\-:\\[\\]]+$/', $hostHeader)) {
-        $sources[] = 'ws://' . $hostHeader;
-        $sources[] = 'wss://' . $hostHeader;
+    $extraConnectSources = $config['realtime']['connect_src'] ?? [];
+    if (is_array($extraConnectSources)) {
+        foreach ($extraConnectSources as $source) {
+            $parsedSource = cspSourceFromUrl((string)$source);
+            if ($parsedSource !== null) {
+                $sources[] = $parsedSource;
+            }
+        }
     }
 
+    $callsEnabled = isset($config['calls']['enabled']) ? (bool)$config['calls']['enabled'] : false;
     $signalingUrl = trim((string)($config['calls']['signaling_url'] ?? ''));
-    if ($signalingUrl !== '' && strpos($signalingUrl, '/') !== 0) {
-        $parsed = @parse_url($signalingUrl);
-        if (is_array($parsed) && !empty($parsed['host'])) {
-            $host = formatSourceHost((string)$parsed['host']);
-            $port = isset($parsed['port']) ? ':' . (int)$parsed['port'] : '';
-            $scheme = strtolower((string)($parsed['scheme'] ?? ''));
-            if (in_array($scheme, ['ws', 'wss', 'http', 'https'], true)) {
-                $sources[] = 'ws://' . $host . $port;
-                $sources[] = 'wss://' . $host . $port;
+    if ($callsEnabled && $signalingUrl !== '') {
+        if (strpos($signalingUrl, '/') === 0) {
+            $hostHeader = validatedHostHeader();
+            if ($hostHeader !== null) {
+                $sources[] = 'ws://' . $hostHeader;
+                $sources[] = 'wss://' . $hostHeader;
+            }
+        } else {
+            $parsed = @parse_url($signalingUrl);
+            if (is_array($parsed) && !empty($parsed['host'])) {
+                $host = formatSourceHost((string)$parsed['host']);
+                $port = isset($parsed['port']) ? ':' . (int)$parsed['port'] : '';
+                $scheme = strtolower((string)($parsed['scheme'] ?? ''));
+                if (in_array($scheme, ['ws', 'wss', 'http', 'https'], true)) {
+                    $sources[] = 'ws://' . $host . $port;
+                    $sources[] = 'wss://' . $host . $port;
+                }
             }
         }
     }
@@ -93,6 +140,13 @@ if (empty($config['installed'])) {
     header('Location: ' . installerUrl());
     exit;
 }
+$realtimeModeRaw = strtolower(trim((string)($config['realtime']['mode'] ?? 'auto')));
+$realtimeMode = in_array($realtimeModeRaw, ['auto', 'sse', 'poll'], true) ? $realtimeModeRaw : 'auto';
+
+$callConfig = $config['calls'] ?? [];
+$callsEnabled = isset($callConfig['enabled']) ? (bool)$callConfig['enabled'] : false;
+$callsSignalingUrl = trim((string)($callConfig['signaling_url'] ?? ''));
+$callsFrontendEnabled = $callsEnabled && $callsSignalingUrl !== '';
 
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
@@ -129,7 +183,9 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/fonts.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/app.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <?php if ($callsFrontendEnabled): ?>
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/call.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endif; ?>
 </head>
 <body data-theme="light">
     <div id="app">
@@ -191,14 +247,15 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                 </div>
                 <div class="sidebar-search">
                     <span class="material-symbols-rounded">search</span>
-                    <input id="user-search" type="text" placeholder="جستجوی نام کاربری...">
-                    <div id="search-results" class="search-results"></div>
+                    <label class="sr-only" for="user-search">جستجوی کاربر</label>
+                    <input id="user-search" type="text" placeholder="جستجوی نام کاربری..." role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-results" aria-haspopup="listbox" autocomplete="off">
+                    <div id="search-results" class="search-results" role="listbox" aria-label="نتایج جستجو"></div>
                 </div>
                 <div id="unread-notice" class="unread-notice hidden" aria-live="polite">
                     <span class="unread-count" id="unread-count">0</span>
                     <span class="unread-text">پیام جدید</span>
                 </div>
-                <div id="chat-list" class="chat-list"></div>
+                <div id="chat-list" class="chat-list" role="listbox" aria-label="لیست گفتگوها" aria-orientation="vertical"></div>
             </aside>
 
             <section class="chat-panel">
@@ -206,7 +263,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                     <button id="back-to-chats" class="icon-btn mobile-only" title="بازگشت" aria-label="بازگشت">
                         <span class="material-symbols-rounded">arrow_forward</span>
                     </button>
-                    <div class="chat-user" id="chat-user-header">
+                    <div class="chat-user" id="chat-user-header" role="button" tabindex="0" aria-label="نمایش اطلاعات گفتگو">
                         <div id="chat-user-avatar" class="avatar"></div>
                         <div class="chat-user-meta">
                             <div id="chat-user-name" class="chat-user-name">گفتگو</div>
@@ -226,7 +283,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                         </button>
                     </div>
                 </div>
-                <div id="messages" class="messages"></div>
+                <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="پیام‌ها"></div>
                 <button id="jump-to-bottom" class="jump-to-bottom hidden" title="رفتن به پایین" aria-label="رفتن به پایین">
                     <span class="material-symbols-rounded">south</span>
                 </button>
@@ -262,7 +319,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                         <span class="material-symbols-rounded">sentiment_satisfied</span>
                     </button>
                     <div class="composer-input">
-                        <textarea id="message-input" rows="1" placeholder="پیام بنویسید..."></textarea>
+                        <textarea id="message-input" rows="1" placeholder="پیام بنویسید..." aria-label="متن پیام"></textarea>
                         <div id="emoji-picker" class="emoji-picker hidden"></div>
                     </div>
                     <button id="voice-btn" class="icon-btn" title="پیام صوتی" aria-label="پیام صوتی">
@@ -339,7 +396,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     <div id="sidebar-menu-overlay" class="menu-overlay hidden"></div>
     <aside id="sidebar-menu" class="sidebar-menu hidden" aria-label="منوی کاربر">
         <div class="menu-header">
-            <div id="menu-avatar" class="menu-avatar">👤</div>
+            <div id="menu-avatar" class="menu-avatar" role="button" tabindex="0" aria-label="نمایش پروفایل">👤</div>
             <div class="menu-user">
                 <div id="menu-user-name" class="menu-user-name">-</div>
                 <div id="menu-user-username" class="menu-user-username">-</div>
@@ -354,7 +411,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                 <span class="material-symbols-rounded">person</span>
                 مخاطبین
             </button>
-            <button id="menu-calls-btn" class="menu-item">
+            <button id="menu-calls-btn" class="menu-item<?php echo $callsFrontendEnabled ? '' : ' hidden'; ?>">
                 <span class="material-symbols-rounded">call</span>
                 تماس‌ها
             </button>
@@ -390,10 +447,10 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="group-modal" class="modal hidden">
+    <div id="group-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-modal-title" aria-hidden="true">
         <div class="modal-card">
             <div class="modal-header">
-                <div class="modal-title">گروه جدید</div>
+                <div id="group-modal-title" class="modal-title">گروه جدید</div>
                 <button id="group-modal-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <form id="group-form" class="modal-body">
@@ -418,10 +475,10 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="group-settings-modal" class="modal hidden">
+    <div id="group-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="group-settings-title" aria-hidden="true">
         <div class="modal-card wide">
             <div class="modal-header">
-                <div class="modal-title">تنظیمات گروه</div>
+                <div id="group-settings-title" class="modal-title">تنظیمات گروه</div>
                 <button id="group-settings-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div class="modal-body">
@@ -479,10 +536,10 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="user-settings-modal" class="modal hidden">
+    <div id="user-settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="user-settings-title" aria-hidden="true">
         <div class="modal-card wide">
             <div class="modal-header">
-                <div class="modal-title">تنظیمات حساب</div>
+                <div id="user-settings-title" class="modal-title">تنظیمات حساب</div>
                 <button id="user-settings-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div class="modal-body">
@@ -535,7 +592,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="reaction-modal" class="modal hidden">
+    <div id="reaction-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="reaction-modal-title" aria-hidden="true">
         <div class="modal-card">
             <div class="modal-header">
                 <div id="reaction-modal-title" class="modal-title">واکنش‌ها</div>
@@ -545,10 +602,10 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="calls-modal" class="modal hidden">
+    <div id="calls-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="calls-modal-title" aria-hidden="true">
         <div class="modal-card">
             <div class="modal-header">
-                <div class="modal-title">تماس‌ها</div>
+                <div id="calls-modal-title" class="modal-title">تماس‌ها</div>
                 <button id="calls-modal-close" class="icon-btn" aria-label="بستن">✖</button>
             </div>
             <div class="modal-body">
@@ -557,25 +614,34 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="lightbox" class="lightbox hidden">
+    <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="پیش‌نمایش تصویر" aria-hidden="true">
         <div class="lightbox-inner">
             <img id="lightbox-img" alt="preview">
             <button id="lightbox-close" class="icon-btn" aria-label="بستن">✖</button>
         </div>
     </div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+    <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
+    <?php if ($callsFrontendEnabled): ?>
     <?php include __DIR__ . '/templates/partials/call-overlay.html'; ?>
+    <?php endif; ?>
 
     <script nonce="<?php echo htmlspecialchars($cspNonce, ENT_QUOTES, 'UTF-8'); ?>">
         window.SELO_CONFIG = {
             baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>',
             basePath: '<?php echo $basePath; ?>',
+            realtime: <?php
+                $realtimePayload = [
+                    'mode' => $realtimeMode,
+                ];
+                echo json_encode($realtimePayload, JSON_UNESCAPED_UNICODE);
+            ?>,
             calls: <?php
-                $callConfig = $config['calls'] ?? [];
                 $iceServers = $callConfig['ice_servers'] ?? [];
                 $callsPayload = [
-                    'enabled' => isset($callConfig['enabled']) ? (bool)$callConfig['enabled'] : true,
-                    'signalingUrl' => $callConfig['signaling_url'] ?? '',
+                    'enabled' => $callsEnabled,
+                    'signalingUrl' => $callsSignalingUrl,
                     'ringTimeoutSeconds' => (int)($callConfig['ring_timeout_seconds'] ?? 45),
                     'iceServers' => $iceServers,
                 ];
@@ -584,7 +650,9 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         };
     </script>
     <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/emoji-picker.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <?php if ($callsFrontendEnabled): ?>
     <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/js/call-ui.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <?php endif; ?>
     <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/app.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

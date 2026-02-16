@@ -33,6 +33,7 @@ return [
         'ffprobe_path' => '',
     ],
     'realtime' => [
+        'mode' => 'auto',
         'sse_retry_ms' => 2000,
         'sse_heartbeat_seconds' => 20,
         'sse_max_seconds' => 55,
@@ -51,8 +52,8 @@ return [
         ],
     ],
     'calls' => [
-        'enabled' => true,
-        'signaling_url' => 'ws://localhost:3001/ws',
+        'enabled' => false,
+        'signaling_url' => '',
         'signaling_secret' => 'CHANGE_ME',
         'token_ttl_seconds' => 604800,
         'ring_timeout_seconds' => 45,

@@ -131,7 +131,15 @@ $defaultUploads = [
     'voice_max_size' => 10 * 1024 * 1024,
     'file_max_size' => 20 * 1024 * 1024,
 ];
+$defaultRealtime = [
+    'mode' => 'auto',
+    'sse_retry_ms' => 2000,
+    'sse_heartbeat_seconds' => 20,
+    'sse_max_seconds' => 55,
+];
 $defaultCalls = [
+    'enabled' => false,
+    'signaling_url' => '',
     'token_ttl_seconds' => 120,
     'ring_timeout_seconds' => 45,
     'rate_limit' => [
@@ -265,6 +273,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($signalingSecret === '') {
                 $signalingSecret = bin2hex(random_bytes(32));
             }
+            $callsEnabled = ($_POST['calls_enabled'] ?? '0') === '1';
+            $signalingUrlInput = trim((string)($_POST['signaling_url'] ?? ''));
 
             $uploads = [
                 'dir' => $basePath . '/storage/uploads',
@@ -280,12 +290,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($errors)) {
                 $jwtTtlSeconds = parseDurationSeconds('jwt_ttl_value', 'jwt_ttl_unit', 60 * 60 * 24 * 7, $errors, 'مدت اعتبار توکن');
             }
+            if (empty($errors) && $callsEnabled) {
+                if ($signalingUrlInput === '') {
+                    $errors[] = 'برای فعال‌سازی تماس صوتی، آدرس سیگنالینگ الزامی است.';
+                } else {
+                    $isRelative = strpos($signalingUrlInput, '/') === 0;
+                    $isAbsolute = (bool)preg_match('#^(ws|wss|http|https)://#i', $signalingUrlInput);
+                    if (!$isRelative && !$isAbsolute) {
+                        $errors[] = 'آدرس سیگنالینگ باید با ws://، wss://، http://، https:// یا / شروع شود.';
+                    }
+                }
+            }
 
             if (empty($errors)) {
-                $signalingUrl = preg_replace('#^http#i', 'ws', $appUrl);
-                $signalingUrl = rtrim($signalingUrl, '/') . '/ws';
                 $calls = [
-                    'signaling_url' => $signalingUrl,
+                    'enabled' => $callsEnabled,
+                    'signaling_url' => $callsEnabled ? $signalingUrlInput : '',
                     'signaling_secret' => $signalingSecret,
                     'token_ttl_seconds' => $defaultCalls['token_ttl_seconds'],
                     'ring_timeout_seconds' => $defaultCalls['ring_timeout_seconds'],
@@ -304,6 +324,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ],
                     'db' => $db,
                     'uploads' => $uploads,
+                    'realtime' => $defaultRealtime,
                     'calls' => $calls,
                     'logging' => $defaultLogging,
                 ];
@@ -345,6 +366,8 @@ if ($step === 'finish') {
 $step4Defaults = [
     'app_url' => defaultAppUrl(),
     'jwt_secret' => '',
+    'calls_enabled' => '0',
+    'signaling_url' => '',
     'signaling_secret' => '',
     'jwt_ttl_value' => '1',
     'jwt_ttl_unit' => 'week',
@@ -359,6 +382,8 @@ $step4Defaults = [
 $step4Values = [
     'app_url' => $_POST['app_url'] ?? $step4Defaults['app_url'],
     'jwt_secret' => $_POST['jwt_secret'] ?? $step4Defaults['jwt_secret'],
+    'calls_enabled' => $_POST['calls_enabled'] ?? $step4Defaults['calls_enabled'],
+    'signaling_url' => $_POST['signaling_url'] ?? $step4Defaults['signaling_url'],
     'signaling_secret' => $_POST['signaling_secret'] ?? $step4Defaults['signaling_secret'],
     'jwt_ttl_value' => $_POST['jwt_ttl_value'] ?? $step4Defaults['jwt_ttl_value'],
     'jwt_ttl_unit' => $_POST['jwt_ttl_unit'] ?? $step4Defaults['jwt_ttl_unit'],
@@ -490,7 +515,14 @@ $step4Values = [
                         </label>
                     </div>
                 </div>
-                <label>کلید سیگنالینگ تماس (خالی بگذارید تا خودکار ساخته شود)</label>
+                <label class="checkbox-inline">
+                    <input type="checkbox" id="calls_enabled" name="calls_enabled" value="1" <?php echo $step4Values['calls_enabled'] === '1' ? 'checked' : ''; ?>>
+                    فعال‌سازی تماس صوتی (نیازمند سرویس سیگنالینگ خارجی)
+                </label>
+                <div class="hint">در هاست اشتراکی cPanel، تماس صوتی فقط با سرویس خارجی یا Managed قابل استفاده است.</div>
+                <label>آدرس سیگنالینگ تماس</label>
+                <input type="text" id="signaling_url" name="signaling_url" value="<?php echo htmlspecialchars($step4Values['signaling_url'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="wss://signaling.example.com/ws یا /ws">
+                <label>کلید سیگنالینگ تماس (برای سرویس سیگنالینگ)</label>
                 <div class="input-row">
                     <div class="grow">
                         <input type="password" id="signaling_secret" name="signaling_secret" value="<?php echo htmlspecialchars($step4Values['signaling_secret'], ENT_QUOTES, 'UTF-8'); ?>">
@@ -600,8 +632,35 @@ $step4Values = [
             });
         }
 
+        function bindCallsToggle() {
+            var callsEnabled = document.getElementById('calls_enabled');
+            var signalingUrl = document.getElementById('signaling_url');
+            var signalingSecret = document.getElementById('signaling_secret');
+            var toggleSignaling = document.getElementById('toggle-signaling');
+            var generateSignaling = document.getElementById('generate-signaling');
+            if (!callsEnabled || !signalingUrl || !signalingSecret) {
+                return;
+            }
+
+            function sync() {
+                var enabled = callsEnabled.checked;
+                signalingUrl.disabled = !enabled;
+                signalingSecret.disabled = !enabled;
+                if (toggleSignaling) {
+                    toggleSignaling.disabled = !enabled;
+                }
+                if (generateSignaling) {
+                    generateSignaling.disabled = !enabled;
+                }
+            }
+
+            callsEnabled.addEventListener('change', sync);
+            sync();
+        }
+
         bindSecretControls('jwt_secret', 'toggle-jwt', 'generate-jwt');
         bindSecretControls('signaling_secret', 'toggle-signaling', 'generate-signaling');
+        bindCallsToggle();
     })();
 </script>
 </html>

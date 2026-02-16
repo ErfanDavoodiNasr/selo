@@ -100,8 +100,9 @@ Installer steps:
 
 ## Voice Calling (WebRTC) — Important Notes
 - Voice calls are **audio‑only** and require **WebRTC** + a **signaling server** (WebSocket). Pure PHP/shared hosting alone is not enough.
-- Recommended: run the **Node.js signaling server** in `signaling/` (via cPanel Node App, VPS, or managed Node host).
-- If cPanel doesn’t support Node/WebSockets, you must host signaling separately and point `calls.signaling_url` to it.
+- By default, `calls.enabled` is **false** in configuration templates and installer output (safe for cPanel shared hosting).
+- If your cPanel plan does not support Node/WebSockets, keep calls disabled or host signaling externally and point `calls.signaling_url` to that external endpoint.
+- For messenger realtime itself, use built-in **SSE + polling fallback** (`/api/stream` and `/api/poll`) which is PHP-compatible.
 - Configure `calls.signaling_secret` (now in installer) and use the same value as `SIGNALING_SECRET` for the signaling server.
 - No public STUN/TURN server is enabled by default (offline-safe). Add internal STUN/TURN servers to `calls.ice_servers` in `config/config.php` when needed.
 - HTTPS requires **wss://** for signaling.

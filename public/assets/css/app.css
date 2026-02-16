@@ -137,6 +137,10 @@ a:focus-visible {
   min-width: 0;
 }
 
+.chat-user[role="button"] {
+  cursor: pointer;
+}
+
 .messages {
   z-index: 1;
   flex: 1;
@@ -207,6 +211,12 @@ a:focus-visible {
   min-height: 60px;
   align-items: center;
   cursor: pointer;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
 }
 
 .chat-item-body {
@@ -246,6 +256,10 @@ body[data-theme="dark"] .chat-item-time {
 }
 
 .chat-item.active {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.chat-item[aria-selected="true"] {
   background: rgba(59, 130, 246, 0.12);
 }
 
@@ -864,7 +878,12 @@ body {
 }
 
 .icon-btn:focus-visible,
-.send-btn:focus-visible {
+.send-btn:focus-visible,
+.chat-item:focus-visible,
+.search-item:focus-visible,
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
   outline: 2px solid var(--tg-primary);
   outline-offset: 2px;
 }
@@ -903,9 +922,18 @@ body {
   padding: var(--tg-gap-3) var(--tg-gap-4);
   margin-bottom: var(--tg-gap-2);
   background: transparent;
+  width: 100%;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
 }
 
 .chat-item.active {
+  background: #eaf2ff;
+}
+
+.chat-item[aria-selected="true"] {
   background: #eaf2ff;
 }
 
