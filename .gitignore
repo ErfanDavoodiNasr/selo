@@ -13,6 +13,8 @@
 
 # PHP/Composer
 vendor/
+!public/assets/vendor/
+!public/assets/vendor/**
 composer.phar
 .phpunit.result.cache
 
