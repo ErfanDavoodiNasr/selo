@@ -8,7 +8,8 @@
     '✅','❌','⚡','🌟','🌙','☀️','⭐','🍎','🍉','🍔','🍕','🎁','🎈','⚽','🏆','📌','📎','✉️','📷','🎧'
   ];
 
-  const baseUrl = 'https://cdn.jsdelivr.net/npm/emoji-datasource-apple@6.0.1/img/apple/64/';
+  const basePath = (window.SELO_CONFIG?.basePath || '').replace(/\/$/, '');
+  const baseUrl = `${basePath}/assets/vendor/emoji/twemoji/72x72/`;
 
   function toCodePoints(str) {
     const codePoints = [];
@@ -23,12 +24,25 @@
     const grid = document.createElement('div');
     grid.className = 'emoji-grid';
     emojiList.forEach(emoji => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'emoji-item';
+      button.title = emoji;
+      button.setAttribute('aria-label', emoji);
+
       const img = document.createElement('img');
-      img.className = 'emoji-item';
       img.alt = emoji;
+      img.loading = 'lazy';
+      img.decoding = 'async';
       img.src = baseUrl + toCodePoints(emoji) + '.png';
-      img.addEventListener('click', () => onSelect(emoji));
-      grid.appendChild(img);
+      img.addEventListener('error', () => {
+        img.remove();
+        button.textContent = emoji;
+      }, { once: true });
+
+      button.appendChild(img);
+      button.addEventListener('click', () => onSelect(emoji));
+      grid.appendChild(button);
     });
     container.appendChild(grid);
   }

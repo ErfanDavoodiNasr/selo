@@ -988,6 +988,37 @@ body.show-info .main-view::after {
   z-index: 30;
 }
 
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 6px;
+  padding: var(--space-2);
+}
+
+.emoji-item {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.emoji-item:hover {
+  background: var(--panel-2);
+}
+
+.emoji-item img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
 .attachment-preview {
   display: flex;
   flex-wrap: wrap;

@@ -3,12 +3,12 @@
 
 function servePublicAsset(string $path): void
 {
-    $assetsRoot = realpath(__DIR__ . '/public/assets');
-    if ($assetsRoot === false) {
+    $publicRoot = realpath(__DIR__ . '/public');
+    if ($publicRoot === false) {
         return;
     }
-    $target = realpath($assetsRoot . '/' . ltrim($path, '/'));
-    if ($target === false || strpos($target, $assetsRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($target)) {
+    $target = realpath($publicRoot . '/' . ltrim($path, '/'));
+    if ($target === false || strpos($target, $publicRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($target)) {
         return;
     }
 
@@ -26,6 +26,8 @@ function servePublicAsset(string $path): void
         'woff2' => 'font/woff2',
         'ttf' => 'font/ttf',
         'eot' => 'application/vnd.ms-fontobject',
+        'map' => 'application/json; charset=UTF-8',
+        'webmanifest' => 'application/manifest+json; charset=UTF-8',
     ];
     $mime = $map[$ext] ?? 'application/octet-stream';
     if (!isset($map[$ext]) && function_exists('finfo_open')) {
@@ -41,6 +43,11 @@ function servePublicAsset(string $path): void
 
     header('Content-Type: ' . $mime);
     header('X-Content-Type-Options: nosniff');
+    if ($path === 'sw.js') {
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+    } else {
+        header('Cache-Control: public, max-age=31536000, immutable');
+    }
     header('Content-Length: ' . filesize($target));
     readfile($target);
     exit;
@@ -57,7 +64,10 @@ if ($basePath !== '' && strpos($relativePath, $basePath . '/') === 0) {
     $relativePath = substr($relativePath, strlen($basePath));
 }
 if (strpos($relativePath, '/assets/') === 0) {
-    servePublicAsset(substr($relativePath, strlen('/assets/')));
+    servePublicAsset(ltrim($relativePath, '/'));
+}
+if ($relativePath === '/sw.js') {
+    servePublicAsset('sw.js');
 }
 
 require __DIR__ . '/public/index.php';

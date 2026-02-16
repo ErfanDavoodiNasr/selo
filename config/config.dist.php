@@ -61,9 +61,7 @@ return [
             'window_minutes' => 1,
             'lock_minutes' => 1,
         ],
-        'ice_servers' => [
-            ['urls' => ['stun:stun.l.google.com:19302']],
-        ],
+        'ice_servers' => [],
     ],
     'logging' => [
         'level' => 'INFO',

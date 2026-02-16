@@ -139,9 +139,7 @@ $defaultCalls = [
         'window_minutes' => 1,
         'lock_minutes' => 2,
     ],
-    'ice_servers' => [
-        ['urls' => ['stun:stun.l.google.com:19302']],
-    ],
+    'ice_servers' => [],
 ];
 $defaultLogging = [
     'level' => 'INFO',

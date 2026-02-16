@@ -334,9 +334,20 @@
     const ringTimeoutSeconds = Number(cfg.ringTimeoutSeconds || 45);
     const iceServers = Array.isArray(cfg.iceServers) && cfg.iceServers.length
       ? cfg.iceServers
-      : [{ urls: ['stun:stun.l.google.com:19302'] }];
+      : [];
     return { enabled, signalingUrl, ringTimeoutSeconds, iceServers };
   })();
+
+  function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+    const swPath = `${basePath || ''}/sw.js`;
+    const scope = basePath ? `${basePath}/` : '/';
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register(swPath, { scope }).catch(() => {
+        // Ignore registration errors in restricted browser modes.
+      });
+    });
+  }
 
   function formatBytes(bytes) {
     if (!bytes && bytes !== 0) return '';
@@ -4071,5 +4082,6 @@
     }
   }
 
+  registerServiceWorker();
   initialize();
 })();

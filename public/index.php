@@ -19,6 +19,70 @@ function installerUrl(): string
     return ($basePath === '' ? '' : $basePath) . '/install/';
 }
 
+function assetUrl(string $basePath, string $relativePath): string
+{
+    $cleanPath = ltrim($relativePath, '/');
+    $absolutePath = __DIR__ . '/' . $cleanPath;
+    $version = is_file($absolutePath) ? (string)filemtime($absolutePath) : '1';
+    $prefix = $basePath === '' ? '' : $basePath;
+    return $prefix . '/' . $cleanPath . '?v=' . rawurlencode($version);
+}
+
+function formatSourceHost(string $host): string
+{
+    if (strpos($host, ':') !== false && strpos($host, '[') !== 0) {
+        return '[' . $host . ']';
+    }
+    return $host;
+}
+
+function cspConnectSources(array $config): array
+{
+    $sources = ["'self'"];
+    $hostHeader = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($hostHeader !== '' && preg_match('/^[A-Za-z0-9.\\-:\\[\\]]+$/', $hostHeader)) {
+        $sources[] = 'ws://' . $hostHeader;
+        $sources[] = 'wss://' . $hostHeader;
+    }
+
+    $signalingUrl = trim((string)($config['calls']['signaling_url'] ?? ''));
+    if ($signalingUrl !== '' && strpos($signalingUrl, '/') !== 0) {
+        $parsed = @parse_url($signalingUrl);
+        if (is_array($parsed) && !empty($parsed['host'])) {
+            $host = formatSourceHost((string)$parsed['host']);
+            $port = isset($parsed['port']) ? ':' . (int)$parsed['port'] : '';
+            $scheme = strtolower((string)($parsed['scheme'] ?? ''));
+            if (in_array($scheme, ['ws', 'wss', 'http', 'https'], true)) {
+                $sources[] = 'ws://' . $host . $port;
+                $sources[] = 'wss://' . $host . $port;
+            }
+        }
+    }
+
+    return array_values(array_unique($sources));
+}
+
+function buildCspHeader(array $config, string $nonce): string
+{
+    $connectSrc = implode(' ', cspConnectSources($config));
+    $directives = [
+        "default-src 'self'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'self'",
+        "object-src 'none'",
+        "script-src 'self' 'nonce-" . $nonce . "'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src " . $connectSrc,
+        "media-src 'self' blob:",
+        "worker-src 'self'",
+        "manifest-src 'self'",
+    ];
+    return implode('; ', $directives);
+}
+
 $configFile = __DIR__ . '/../config/config.php';
 if (!file_exists($configFile)) {
     header('Location: ' . installerUrl());
@@ -51,18 +115,21 @@ if (strpos($path, $apiPrefix) === 0) {
     exit;
 }
 
+$cspNonce = base64_encode(random_bytes(16));
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: same-origin');
+header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
+
 ?><!doctype html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SELO (سلو)</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/style.css">
-    <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/app.css">
-    <link rel="stylesheet" href="<?php echo $basePath; ?>/assets/css/call.css">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/fonts.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/app.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/call.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body data-theme="light">
     <div id="app">
@@ -499,13 +566,13 @@ if (strpos($path, $apiPrefix) === 0) {
 
     <?php include __DIR__ . '/templates/partials/call-overlay.html'; ?>
 
-    <script>
+    <script nonce="<?php echo htmlspecialchars($cspNonce, ENT_QUOTES, 'UTF-8'); ?>">
         window.SELO_CONFIG = {
             baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>',
             basePath: '<?php echo $basePath; ?>',
             calls: <?php
                 $callConfig = $config['calls'] ?? [];
-                $iceServers = $callConfig['ice_servers'] ?? [['urls' => ['stun:stun.l.google.com:19302']]];
+                $iceServers = $callConfig['ice_servers'] ?? [];
                 $callsPayload = [
                     'enabled' => isset($callConfig['enabled']) ? (bool)$callConfig['enabled'] : true,
                     'signalingUrl' => $callConfig['signaling_url'] ?? '',
@@ -516,8 +583,8 @@ if (strpos($path, $apiPrefix) === 0) {
             ?>
         };
     </script>
-    <script src="<?php echo $basePath; ?>/assets/emoji-picker.js"></script>
-    <script src="<?php echo $basePath; ?>/assets/js/call-ui.js"></script>
-    <script src="<?php echo $basePath; ?>/assets/app.js"></script>
+    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/emoji-picker.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/js/call-ui.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/app.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>
