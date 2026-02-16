@@ -68,6 +68,10 @@ Installer steps:
 - Change JWT secret: `app.jwt_secret` (changing it logs everyone out)
 - Upload limits: `uploads.*`
 
+### Offline Compliance Check
+- Run: `php scripts/check-offline-compliance.php`
+- The script scans `public/`, `app/`, `config/`, and `signaling/` for non-local `http(s)/ws(s)/stun/turn` URLs and fails when public-internet dependencies are detected.
+
 ---
 
 ## Logging (App + Error)
@@ -99,5 +103,5 @@ Installer steps:
 - Recommended: run the **Node.js signaling server** in `signaling/` (via cPanel Node App, VPS, or managed Node host).
 - If cPanel doesn’t support Node/WebSockets, you must host signaling separately and point `calls.signaling_url` to it.
 - Configure `calls.signaling_secret` (now in installer) and use the same value as `SIGNALING_SECRET` for the signaling server.
-- Default STUN is included; **TURN is required** for strict NAT/firewalls. Add TURN to `calls.ice_servers` in `config/config.php`.
+- No public STUN/TURN server is enabled by default (offline-safe). Add internal STUN/TURN servers to `calls.ice_servers` in `config/config.php` when needed.
 - HTTPS requires **wss://** for signaling.
