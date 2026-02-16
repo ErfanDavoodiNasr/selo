@@ -300,6 +300,33 @@ select:focus-visible {
   background: var(--bg);
 }
 
+.network-status {
+  position: absolute;
+  top: calc(var(--space-2) + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  border-radius: var(--radius-round);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  background: #f59e0b;
+  color: #111827;
+  max-width: min(90vw, 420px);
+  text-align: center;
+}
+
+.network-status.offline {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.network-status.restored {
+  background: #16a34a;
+  color: #ffffff;
+}
+
 .sidebar,
 .chat-panel,
 .info-panel {
@@ -422,6 +449,14 @@ body.show-info .main-view::after {
   z-index: 20;
 }
 
+.search-group-label {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
 .search-item {
   padding: var(--space-2) var(--space-3);
   cursor: pointer;
@@ -449,6 +484,12 @@ body.show-info .main-view::after {
 .search-item.is-active,
 .search-item[aria-selected="true"] {
   background: var(--panel-2);
+}
+
+.search-item mark {
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .chat-list {
@@ -632,6 +673,27 @@ body.show-info .main-view::after {
   -webkit-overflow-scrolling: touch;
 }
 
+.messages-state {
+  align-self: center;
+  margin: auto 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-3);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  box-shadow: var(--shadow);
+  text-align: center;
+  max-width: min(90%, 460px);
+}
+
+.messages-state.loading {
+  background: var(--panel-2);
+}
+
+.messages-state.error {
+  color: var(--danger);
+}
+
 .message {
   display: flex;
   flex-direction: column;
@@ -643,6 +705,11 @@ body.show-info .main-view::after {
 
 .message:first-child {
   margin-top: 0;
+}
+
+.message.pending,
+.message[data-local-status="sending"] {
+  opacity: 0.9;
 }
 
 .message.grouped-top {
@@ -913,8 +980,20 @@ body.show-info .main-view::after {
   direction: ltr;
 }
 
+.meta-ticks.sending { color: var(--muted); }
 .meta-ticks.seen { color: var(--accent); }
 .meta-ticks.failed { color: var(--danger); }
+
+.message-retry-btn {
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-size: var(--fs-meta);
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  min-height: 20px;
+}
 
 .reaction-bar {
   position: absolute;

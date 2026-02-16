@@ -24,6 +24,7 @@
       connected: false,
       hiddenTimer: null
     },
+    pendingSends: {},
     receiptQueue: {
       delivered: new Set(),
       seen: new Set(),
@@ -45,7 +46,8 @@
     search: {
       results: [],
       activeIndex: -1,
-      requestSeq: 0
+      requestSeq: 0,
+      query: ''
     },
     call: {
       ws: null,
@@ -77,7 +79,8 @@
       contextMessageEl: null,
       contextMessageData: null,
       activeModal: null,
-      modalReturnFocus: null
+      modalReturnFocus: null,
+      lightboxReturnFocus: null
     }
   };
 
@@ -229,6 +232,7 @@
   const remoteAudio = document.getElementById('remote-audio');
   const toastRegion = document.getElementById('toast-region');
   const liveRegion = document.getElementById('live-region');
+  const networkStatus = document.getElementById('network-status');
 
   const cfg = window.SELO_CONFIG || {};
   const apiBase = cfg.baseUrl || '';
@@ -415,6 +419,63 @@
     toast.appendChild(closeBtn);
     toastRegion.appendChild(toast);
     setTimeout(removeToast, assertive ? 7000 : 4500);
+  }
+
+  let networkStatusTimer = null;
+
+  function showNetworkStatus(message, tone = 'degraded', autoHideMs = 0) {
+    if (!networkStatus) return;
+    const text = String(message || '').trim();
+    if (!text) return;
+    if (networkStatusTimer) {
+      clearTimeout(networkStatusTimer);
+      networkStatusTimer = null;
+    }
+    networkStatus.textContent = text;
+    networkStatus.classList.remove('hidden', 'offline', 'degraded', 'restored');
+    networkStatus.classList.add(tone);
+    if (autoHideMs > 0) {
+      networkStatusTimer = setTimeout(() => {
+        networkStatus.classList.add('hidden');
+        networkStatusTimer = null;
+      }, autoHideMs);
+    }
+  }
+
+  function hideNetworkStatus() {
+    if (!networkStatus) return;
+    if (networkStatusTimer) {
+      clearTimeout(networkStatusTimer);
+      networkStatusTimer = null;
+    }
+    networkStatus.classList.add('hidden');
+    networkStatus.classList.remove('offline', 'degraded', 'restored');
+    networkStatus.textContent = '';
+  }
+
+  function updateNetworkStatus() {
+    if (!networkStatus) return;
+    if (!state.token) {
+      hideNetworkStatus();
+      return;
+    }
+    if (navigator.onLine === false) {
+      showNetworkStatus('شما آفلاین هستید. پیام‌ها بعد از اتصال ارسال/دریافت می‌شوند.', 'offline');
+      return;
+    }
+    if (!state.realtime.mode) {
+      hideNetworkStatus();
+      return;
+    }
+    if (!state.realtime.connected) {
+      showNetworkStatus('اتصال ناپایدار است. در حال تلاش برای بازیابی...', 'degraded');
+      return;
+    }
+    if (!networkStatus.classList.contains('hidden')) {
+      showNetworkStatus('اتصال دوباره برقرار شد.', 'restored', 2500);
+    } else {
+      hideNetworkStatus();
+    }
   }
 
   function generateClientId() {
@@ -1751,6 +1812,11 @@
         closeModal(state.ui.activeModal);
         return;
       }
+      if (isLightboxOpen()) {
+        e.preventDefault();
+        closeLightbox();
+        return;
+      }
       if (isSearchResultsOpen()) {
         e.preventDefault();
         closeSearchResults();
@@ -1954,10 +2020,12 @@
   function showAuth() {
     authView.classList.remove('hidden');
     mainView.classList.add('hidden');
+    state.pendingSends = {};
     setInfoPanelVisible(false);
     closeProfilePanel();
     closeSidebarMenu();
     closeMessageMenus();
+    hideNetworkStatus();
   }
 
   function showMain() {
@@ -1965,6 +2033,7 @@
     mainView.classList.remove('hidden');
     document.body.classList.add('show-chats');
     setInfoPanelVisible(false);
+    updateNetworkStatus();
   }
 
   function setAttachments(attachments) {
@@ -2299,6 +2368,7 @@
     }
     state.realtime.connected = false;
     state.realtime.mode = null;
+    updateNetworkStatus();
   }
 
   function startSSE() {
@@ -2317,10 +2387,12 @@
     state.realtime.es = es;
     state.realtime.mode = 'sse';
     state.realtime.connected = false;
+    updateNetworkStatus();
 
     es.addEventListener('open', () => {
       state.realtime.connected = true;
       state.realtime.backoffMs = 1000;
+      updateNetworkStatus();
     });
     es.addEventListener('message', (event) => {
       try {
@@ -2344,6 +2416,7 @@
         state.realtime.es = null;
       }
       state.realtime.connected = false;
+      updateNetworkStatus();
       startPolling(true);
     });
     return true;
@@ -2360,6 +2433,7 @@
     try {
       const etag = `m:${state.realtime.lastMessageId}-r:${state.realtime.lastReceiptId}`;
       const res = await apiFetch(API.poll + '?' + params.toString(), { headers: { 'If-None-Match': etag } });
+      state.realtime.connected = true;
       if (res.status !== 204 && res.data && res.data.ok) {
         const payload = res.data.data || {};
         const messages = payload.messages || [];
@@ -2374,7 +2448,10 @@
         }
         state.realtime.backoffMs = 1000;
       }
+      updateNetworkStatus();
     } catch (err) {
+      state.realtime.connected = false;
+      updateNetworkStatus();
       // ignore and backoff
     }
 
@@ -2396,6 +2473,7 @@
     state.realtime.mode = 'poll';
     state.realtime.connected = false;
     state.realtime.backoffMs = 1000;
+    updateNetworkStatus();
     pollLoop();
   }
 
@@ -2434,6 +2512,9 @@
       startRealtime();
     }
   });
+
+  window.addEventListener('online', updateNetworkStatus);
+  window.addEventListener('offline', updateNetworkStatus);
 
   async function handleLogin(payload, endpoint) {
     authError.textContent = '';
@@ -2907,6 +2988,7 @@
   }
 
   function messageReceiptStatusLabel(status) {
+    if (status === 'sending') return 'در حال ارسال';
     if (status === 'failed') return 'ناموفق';
     if (status === 'seen') return 'خوانده‌شده';
     if (status === 'delivered') return 'تحویل‌شده';
@@ -3415,29 +3497,42 @@
     }
     applyComposerPermissions();
     await loadMessages();
+    renderPendingMessagesForCurrentConversation();
   }
 
   async function loadMessages(beforeId = null) {
     if (!state.currentConversation || state.loadingMessages) return;
-    state.loadingMessages = true;
-    let res = null;
-    if (isGroupChat()) {
-      const params = new URLSearchParams({ limit: 30 });
-      if (beforeId) {
-        params.set('cursor', beforeId);
-      }
-      res = await apiFetch(API.groupMessages(state.currentConversation.id) + '?' + params.toString());
-    } else {
-      const params = new URLSearchParams({
-        conversation_id: state.currentConversation.id,
-        limit: 30
-      });
-      if (beforeId) {
-        params.set('before_id', beforeId);
-      }
-      res = await apiFetch(API.messages + '?' + params.toString());
+    const initialLoad = beforeId === null;
+    if (initialLoad && !messagesEl.querySelector('.message')) {
+      showMessagesLoadingState();
     }
-    if (res.data.ok) {
+    state.loadingMessages = true;
+    try {
+      let res = null;
+      if (isGroupChat()) {
+        const params = new URLSearchParams({ limit: 30 });
+        if (beforeId) {
+          params.set('cursor', beforeId);
+        }
+        res = await apiFetch(API.groupMessages(state.currentConversation.id) + '?' + params.toString());
+      } else {
+        const params = new URLSearchParams({
+          conversation_id: state.currentConversation.id,
+          limit: 30
+        });
+        if (beforeId) {
+          params.set('before_id', beforeId);
+        }
+        res = await apiFetch(API.messages + '?' + params.toString());
+      }
+
+      if (!res.data.ok) {
+        if (initialLoad && !messagesEl.querySelector('.message')) {
+          showMessagesState('error', 'دریافت پیام‌ها ممکن نشد.');
+        }
+        return;
+      }
+
       const list = res.data.data;
       if (list.length > 0) {
         state.oldestMessageId = list[0].id;
@@ -3445,12 +3540,25 @@
         state.realtime.lastMessageId = Math.max(state.realtime.lastMessageId, maxId);
       }
       renderMessages(list, beforeId !== null);
-      if (!beforeId) {
+      if (initialLoad) {
+        if (!list.length) {
+          renderPendingMessagesForCurrentConversation();
+          if (!messagesEl.querySelector('.message')) {
+            showMessagesState('empty', 'هنوز پیامی در این گفتگو ثبت نشده است.');
+          }
+        }
         queueReceipt(list.filter(msg => msg.sender_id !== state.me.id).map(msg => msg.id), 'delivered');
         markSeenForVisible();
       }
+    } catch (err) {
+      if (initialLoad && !messagesEl.querySelector('.message')) {
+        showMessagesState('error', 'خطا در دریافت پیام‌ها. دوباره تلاش کنید.');
+      } else {
+        notify(err.message || 'خطا در دریافت پیام‌ها');
+      }
+    } finally {
+      state.loadingMessages = false;
     }
-    state.loadingMessages = false;
   }
 
   function createVoicePlayer(att) {
@@ -3550,6 +3658,37 @@
     return btn;
   }
 
+  function isLightboxOpen() {
+    return !!lightbox && !lightbox.classList.contains('hidden');
+  }
+
+  function openLightboxForMedia(mediaId) {
+    if (!lightbox || !lightboxImg || !mediaId) return;
+    state.ui.lightboxReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    lightboxImg.src = makeUrl(API.media(mediaId));
+    lightboxImg.dataset.mediaId = String(mediaId);
+    lightbox.classList.remove('hidden');
+    lightbox.setAttribute('aria-hidden', 'false');
+    requestAnimationFrame(() => {
+      lightboxClose?.focus();
+    });
+  }
+
+  function closeLightbox() {
+    if (!lightbox || !lightboxImg) return;
+    lightbox.classList.add('hidden');
+    lightbox.setAttribute('aria-hidden', 'true');
+    lightboxImg.src = '';
+    lightboxImg.dataset.mediaId = '';
+    const returnFocus = state.ui.lightboxReturnFocus;
+    state.ui.lightboxReturnFocus = null;
+    if (returnFocus && typeof returnFocus.focus === 'function') {
+      requestAnimationFrame(() => {
+        returnFocus.focus();
+      });
+    }
+  }
+
   function appendMessageContent(message, msg) {
     const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
     const fallback = msg.media ? [msg.media] : [];
@@ -3583,13 +3722,14 @@
           const src = att.thumbnail_name ? makeUrl(API.mediaThumb(att.id)) : makeUrl(API.media(att.id));
           img.src = src;
           img.alt = att.original_name || 'photo';
-          img.addEventListener('click', () => {
-            lightboxImg.src = makeUrl(API.media(att.id));
-            if (lightboxImg) {
-              lightboxImg.dataset.mediaId = String(att.id);
-            }
-            lightbox.classList.remove('hidden');
-            lightbox.setAttribute('aria-hidden', 'false');
+          img.tabIndex = 0;
+          img.setAttribute('role', 'button');
+          img.setAttribute('aria-label', `نمایش بزرگ عکس${att.original_name ? ` ${att.original_name}` : ''}`);
+          img.addEventListener('click', () => openLightboxForMedia(att.id));
+          img.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openLightboxForMedia(att.id);
           });
           const dl = createDownloadButton(att, 'ذخیره عکس');
           dl.classList.add('media-download-overlay');
@@ -3635,11 +3775,16 @@
 
   function applyReceiptToTicks(element, receipt) {
     const status = receipt?.status || 'sent';
-    element.classList.remove('seen', 'failed');
+    element.classList.remove('seen', 'failed', 'sending');
     element.setAttribute('role', 'img');
     const statusLabel = messageReceiptStatusLabel(status);
     element.setAttribute('aria-label', `وضعیت پیام: ${statusLabel}`);
     element.title = statusLabel;
+    if (status === 'sending') {
+      element.textContent = '…';
+      element.classList.add('sending');
+      return;
+    }
     if (status === 'failed') {
       element.textContent = '!';
       element.classList.add('failed');
@@ -3667,22 +3812,198 @@
     }
   }
 
+  function clearMessagesState() {
+    messagesEl.querySelectorAll('.messages-state').forEach((node) => node.remove());
+  }
+
+  function showMessagesState(type, text) {
+    if (!messagesEl) return;
+    clearMessagesState();
+    const stateBox = document.createElement('div');
+    stateBox.className = `messages-state ${type}`;
+    stateBox.textContent = text;
+    messagesEl.appendChild(stateBox);
+  }
+
+  function showMessagesLoadingState() {
+    showMessagesState('loading', 'در حال بارگذاری پیام‌ها...');
+  }
+
+  function nowSqlDateTime() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hour = String(now.getHours()).padStart(2, '0');
+    const minute = String(now.getMinutes()).padStart(2, '0');
+    const second = String(now.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+  }
+
+  function getMessageElementByClientId(clientId) {
+    if (!clientId) return null;
+    const all = Array.from(messagesEl.querySelectorAll('.message'));
+    return all.find((element) => element.dataset.clientId === clientId) || null;
+  }
+
+  function reconcilePendingSend(clientId) {
+    if (!clientId) return;
+    const pendingEl = getMessageElementByClientId(clientId);
+    if (pendingEl && pendingEl.dataset.pending === '1') {
+      pendingEl.remove();
+    }
+    delete state.pendingSends[clientId];
+  }
+
+  function setPendingMessageStatus(clientId, status) {
+    const pending = state.pendingSends[clientId];
+    if (pending?.optimisticMessage) {
+      pending.optimisticMessage.local_status = status;
+    }
+    const messageEl = getMessageElementByClientId(clientId);
+    if (!messageEl) return;
+    messageEl.dataset.localStatus = status;
+    messageEl.dataset.pending = '1';
+    const baseLabel = messageEl.dataset.ariaLabelBase || '';
+    if (baseLabel) {
+      messageEl.setAttribute('aria-label', `${baseLabel}، وضعیت: ${messageReceiptStatusLabel(status)}`);
+    }
+    const ticks = messageEl.querySelector('.meta-ticks');
+    if (ticks) {
+      applyReceiptToTicks(ticks, { status });
+    }
+    const meta = messageEl.querySelector('.meta');
+    if (!meta) return;
+    const existingRetry = meta.querySelector('.message-retry-btn');
+    if (status === 'failed') {
+      if (!existingRetry) {
+        const retryBtn = document.createElement('button');
+        retryBtn.type = 'button';
+        retryBtn.className = 'message-retry-btn';
+        retryBtn.textContent = 'تلاش مجدد';
+        retryBtn.addEventListener('click', () => {
+          retryPendingMessage(clientId);
+        });
+        meta.appendChild(retryBtn);
+      }
+    } else if (existingRetry) {
+      existingRetry.remove();
+    }
+  }
+
+  function buildOptimisticMessage(payload, options = {}) {
+    const { attachments = [], replyMessage = null } = options;
+    const clientId = payload.client_id;
+    const id = `temp-${clientId}`;
+    return {
+      id,
+      client_id: clientId,
+      sender_id: state.me?.id,
+      sender_name: state.me?.full_name || 'شما',
+      sender_photo_id: state.me?.active_photo_id || null,
+      type: payload.type || 'text',
+      body: payload.body || '',
+      media: attachments.length ? attachments[0] : null,
+      attachments,
+      created_at: nowSqlDateTime(),
+      receipt: { status: 'sending' },
+      local_status: 'sending',
+      current_user_reaction: '',
+      reactions: [],
+      reply_id: replyMessage?.id || null,
+      reply_type: replyMessage?.type || null,
+      reply_media_name: replyMessage?.media?.original_name || null,
+      reply_body: replyMessage?.body || '',
+      reply_sender_name: replyMessage?.sender_name || ''
+    };
+  }
+
+  async function retryPendingMessage(clientId) {
+    const pending = state.pendingSends[clientId];
+    if (!pending || pending.busy) return;
+    pending.busy = true;
+    setPendingMessageStatus(clientId, 'sending');
+    try {
+      const res = await apiFetch(pending.endpoint, { method: 'POST', body: pending.payload });
+      if (!res.data.ok) {
+        throw new Error(res.data.error || 'خطا در ارسال پیام');
+      }
+      setPendingMessageStatus(clientId, 'sent');
+      scheduleConversationsRefresh();
+      const sameConversation = state.currentConversation && conversationKey(state.currentConversation) === pending.conversationKey;
+      if (!state.realtime.connected || state.realtime.mode === 'poll') {
+        if (sameConversation) {
+          await loadMessages();
+        }
+        await loadConversations();
+      }
+    } catch (err) {
+      setPendingMessageStatus(clientId, 'failed');
+      notify(err.message || 'خطا در ارسال پیام');
+    } finally {
+      pending.busy = false;
+    }
+  }
+
+  function enqueuePendingMessage(endpoint, payload, options = {}) {
+    const clientId = payload.client_id;
+    if (!clientId) return;
+    const optimisticMessage = buildOptimisticMessage(payload, options);
+    state.pendingSends[clientId] = {
+      endpoint,
+      payload: { ...payload },
+      conversationKey: state.currentConversation ? conversationKey(state.currentConversation) : '',
+      busy: false,
+      optimisticMessage: { ...optimisticMessage }
+    };
+    renderMessages([optimisticMessage]);
+  }
+
+  function renderPendingMessagesForCurrentConversation() {
+    if (!state.currentConversation) return;
+    const currentKey = conversationKey(state.currentConversation);
+    const pendingMessages = Object.values(state.pendingSends)
+      .filter((pending) => pending.conversationKey === currentKey && pending.optimisticMessage)
+      .map((pending) => ({ ...pending.optimisticMessage }))
+      .sort((a, b) => parseDateTime(a.created_at).getTime() - parseDateTime(b.created_at).getTime());
+    if (!pendingMessages.length) return;
+    renderMessages(pendingMessages);
+  }
+
   function renderMessages(messages, prepend = false) {
+    if (Array.isArray(messages) && messages.length) {
+      clearMessagesState();
+    }
     const fragment = document.createDocumentFragment();
     const inserted = [];
     messages.forEach(msg => {
+      const localStatus = String(msg.local_status || msg.pending_status || '').trim();
+      const isPendingMessage = msg.is_pending === true || localStatus !== '' || String(msg.id).startsWith('temp-');
+      if (msg.client_id && !isPendingMessage && msg.sender_id === state.me.id) {
+        reconcilePendingSend(String(msg.client_id));
+      }
       if (document.getElementById(`msg-${msg.id}`)) {
         return;
       }
       const message = document.createElement('article');
       message.className = 'message ' + (msg.sender_id === state.me.id ? 'outgoing' : 'incoming');
+      if (isPendingMessage) {
+        message.classList.add('pending');
+      }
       message.id = `msg-${msg.id}`;
       message.dataset.currentReaction = msg.current_user_reaction || '';
       message.dataset.senderId = String(msg.sender_id || '');
+      if (msg.client_id) {
+        message.dataset.clientId = String(msg.client_id);
+      }
+      if (localStatus) {
+        message.dataset.localStatus = localStatus;
+        message.dataset.pending = '1';
+      }
       message.setAttribute('role', 'article');
       message.setAttribute('aria-roledescription', 'پیام');
       message.dataset.ariaLabelBase = buildMessageAriaLabelBase(msg);
-      message.setAttribute('aria-label', buildMessageAriaLabel(msg));
+      message.setAttribute('aria-label', buildMessageAriaLabel(msg, localStatus || null));
 
       const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
       const hasMedia = attachments.length > 0 || !!msg.media;
@@ -3690,25 +4011,29 @@
         message.classList.add('emoji-only');
       }
 
-      const reactionBar = buildReactionBar(msg.id, msg.current_user_reaction);
-      message.appendChild(reactionBar);
+      if (!isPendingMessage) {
+        const reactionBar = buildReactionBar(msg.id, msg.current_user_reaction);
+        message.appendChild(reactionBar);
+      }
 
-      const moreBtn = document.createElement('button');
-      moreBtn.className = 'message-more';
-      moreBtn.type = 'button';
-      moreBtn.innerHTML = '<span class="material-symbols-rounded">more_vert</span>';
-      moreBtn.setAttribute('aria-label', 'گزینه‌های پیام');
-      moreBtn.title = 'گزینه‌های پیام';
-      moreBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const rect = moreBtn.getBoundingClientRect();
-        if (isMobileLayout()) {
-          openMessageActionSheet(msg.id, message, msg);
-        } else {
-          openMessageContextMenu(msg.id, message, msg, rect.left, rect.bottom + 6);
-        }
-      });
-      message.appendChild(moreBtn);
+      if (!isPendingMessage) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'message-more';
+        moreBtn.type = 'button';
+        moreBtn.innerHTML = '<span class="material-symbols-rounded">more_vert</span>';
+        moreBtn.setAttribute('aria-label', 'گزینه‌های پیام');
+        moreBtn.title = 'گزینه‌های پیام';
+        moreBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const rect = moreBtn.getBoundingClientRect();
+          if (isMobileLayout()) {
+            openMessageActionSheet(msg.id, message, msg);
+          } else {
+            openMessageContextMenu(msg.id, message, msg, rect.left, rect.bottom + 6);
+          }
+        });
+        message.appendChild(moreBtn);
+      }
 
       if (isGroupChat()) {
         const senderWrap = document.createElement('div');
@@ -3748,32 +4073,34 @@
 
       appendMessageContent(message, msg);
 
-      const actions = document.createElement('div');
-      actions.className = 'actions';
+      if (!isPendingMessage) {
+        const actions = document.createElement('div');
+        actions.className = 'actions';
 
-      const replyBtn = document.createElement('button');
-      replyBtn.className = 'action-btn';
-      replyBtn.textContent = 'پاسخ';
-      replyBtn.addEventListener('click', () => setReply(msg));
+        const replyBtn = document.createElement('button');
+        replyBtn.className = 'action-btn';
+        replyBtn.textContent = 'پاسخ';
+        replyBtn.addEventListener('click', () => setReply(msg));
 
-      const delMeBtn = document.createElement('button');
-      delMeBtn.className = 'action-btn';
-      delMeBtn.textContent = 'حذف برای من';
-      delMeBtn.addEventListener('click', () => deleteForMe(msg.id));
+        const delMeBtn = document.createElement('button');
+        delMeBtn.className = 'action-btn';
+        delMeBtn.textContent = 'حذف برای من';
+        delMeBtn.addEventListener('click', () => deleteForMe(msg.id));
 
-      const delAllBtn = document.createElement('button');
-      delAllBtn.className = 'action-btn';
-      delAllBtn.textContent = 'حذف برای همه';
-      delAllBtn.addEventListener('click', () => deleteForEveryone(msg.id, message));
+        const delAllBtn = document.createElement('button');
+        delAllBtn.className = 'action-btn';
+        delAllBtn.textContent = 'حذف برای همه';
+        delAllBtn.addEventListener('click', () => deleteForEveryone(msg.id, message));
 
-      actions.appendChild(replyBtn);
-      actions.appendChild(delMeBtn);
-      actions.appendChild(delAllBtn);
-      message.appendChild(actions);
+        actions.appendChild(replyBtn);
+        actions.appendChild(delMeBtn);
+        actions.appendChild(delAllBtn);
+        message.appendChild(actions);
 
-      const chips = buildReactionChips(msg.id, msg.reactions || [], msg.current_user_reaction);
-      if (chips) {
-        message.appendChild(chips);
+        const chips = buildReactionChips(msg.id, msg.reactions || [], msg.current_user_reaction);
+        if (chips) {
+          message.appendChild(chips);
+        }
       }
 
       const meta = document.createElement('div');
@@ -3787,21 +4114,36 @@
       if (msg.sender_id === state.me.id) {
         const ticks = document.createElement('span');
         ticks.className = 'meta-ticks';
-        applyReceiptToTicks(ticks, msg.receipt || null);
+        const receipt = localStatus
+          ? { status: localStatus }
+          : (msg.receipt || null);
+        applyReceiptToTicks(ticks, receipt);
         meta.appendChild(ticks);
+        if (localStatus === 'failed' && msg.client_id) {
+          const retryBtn = document.createElement('button');
+          retryBtn.type = 'button';
+          retryBtn.className = 'message-retry-btn';
+          retryBtn.textContent = 'تلاش مجدد';
+          retryBtn.addEventListener('click', () => {
+            retryPendingMessage(String(msg.client_id));
+          });
+          meta.appendChild(retryBtn);
+        }
       }
       message.appendChild(meta);
 
-      message.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (isMobileLayout()) {
-          openMessageActionSheet(msg.id, message, msg);
-          return;
-        }
-        openMessageContextMenu(msg.id, message, msg, e.clientX, e.clientY);
-      });
+      if (!isPendingMessage) {
+        message.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          if (isMobileLayout()) {
+            openMessageActionSheet(msg.id, message, msg);
+            return;
+          }
+          openMessageContextMenu(msg.id, message, msg, e.clientX, e.clientY);
+        });
 
-      attachMessageLongPress(message, msg);
+        attachMessageLongPress(message, msg);
+      }
       fragment.appendChild(message);
       inserted.push(message);
     });
@@ -3855,10 +4197,14 @@
 
   let markReadTimer = null;
   function getLastMessageId() {
-    const last = messagesEl.querySelector('.message:last-child');
-    if (!last) return 0;
-    const id = Number(String(last.id || '').replace('msg-', ''));
-    return Number.isFinite(id) ? id : 0;
+    const messages = Array.from(messagesEl.querySelectorAll('.message')).reverse();
+    for (const messageEl of messages) {
+      const id = Number(String(messageEl.id || '').replace('msg-', ''));
+      if (Number.isFinite(id) && id > 0) {
+        return id;
+      }
+    }
+    return 0;
   }
 
   async function markReadForCurrentConversation() {
@@ -3913,6 +4259,7 @@
     const endpoint = isGroupChat()
       ? API.groupMessages(state.currentConversation.id)
       : API.messages;
+    const replyMessage = state.replyTo ? { ...state.replyTo } : null;
 
     if (state.pendingAttachments.length) {
       if (state.uploading) return;
@@ -3956,17 +4303,24 @@
         if (state.replyTo) {
           payload.reply_to_message_id = state.replyTo.id;
         }
-        const res = await apiFetch(endpoint, { method: 'POST', body: payload });
-        if (res.data.ok) {
-          messageInput.value = '';
-          clearAttachments();
-          clearReply();
-          scheduleConversationsRefresh();
-          if (!state.realtime.connected) {
-            await loadMessages();
-            await loadConversations();
-          }
-        }
+        const optimisticAttachments = uploadItems.map((item) => ({
+          id: item.media_id,
+          type: item.type || 'file',
+          original_name: item.original_name || '',
+          size_bytes: item.size_bytes || 0,
+          duration: item.duration || null,
+          width: item.width || null,
+          height: item.height || null,
+          thumbnail_name: item.thumbnail_name || null
+        }));
+        messageInput.value = '';
+        clearAttachments();
+        clearReply();
+        enqueuePendingMessage(endpoint, payload, {
+          attachments: optimisticAttachments,
+          replyMessage
+        });
+        await retryPendingMessage(payload.client_id);
       } catch (err) {
         notify(err.message || 'خطا در ارسال فایل');
       } finally {
@@ -3988,16 +4342,10 @@
     if (state.replyTo) {
       payload.reply_to_message_id = state.replyTo.id;
     }
-    const res = await apiFetch(endpoint, { method: 'POST', body: payload });
-    if (res.data.ok) {
-      messageInput.value = '';
-      clearReply();
-      scheduleConversationsRefresh();
-      if (!state.realtime.connected) {
-        await loadMessages();
-        await loadConversations();
-      }
-    }
+    messageInput.value = '';
+    clearReply();
+    enqueuePendingMessage(endpoint, payload, { replyMessage });
+    await retryPendingMessage(payload.client_id);
   }
 
   function setReply(msg) {
@@ -4262,16 +4610,10 @@
   });
 
   if (lightbox && lightboxClose) {
-    lightboxClose.addEventListener('click', () => {
-      lightbox.classList.add('hidden');
-      lightbox.setAttribute('aria-hidden', 'true');
-      lightboxImg.src = '';
-    });
+    lightboxClose.addEventListener('click', closeLightbox);
     lightbox.addEventListener('click', (e) => {
       if (e.target === lightbox) {
-        lightbox.classList.add('hidden');
-        lightbox.setAttribute('aria-hidden', 'true');
-        lightboxImg.src = '';
+        closeLightbox();
       }
     });
   }
@@ -4310,6 +4652,7 @@
     }
     state.search.results = [];
     state.search.activeIndex = -1;
+    state.search.query = '';
     if (searchResults) {
       searchResults.innerHTML = '';
       searchResults.style.display = 'none';
@@ -4368,6 +4711,29 @@
     }
   }
 
+  function appendHighlightedText(container, text, query) {
+    if (!container) return;
+    const source = String(text || '');
+    const needle = String(query || '').trim();
+    if (!needle) {
+      container.textContent = source;
+      return;
+    }
+    const lowerSource = source.toLocaleLowerCase('fa-IR');
+    const lowerNeedle = needle.toLocaleLowerCase('fa-IR');
+    const index = lowerSource.indexOf(lowerNeedle);
+    if (index < 0) {
+      container.textContent = source;
+      return;
+    }
+    container.textContent = '';
+    container.appendChild(document.createTextNode(source.slice(0, index)));
+    const mark = document.createElement('mark');
+    mark.textContent = source.slice(index, index + needle.length);
+    container.appendChild(mark);
+    container.appendChild(document.createTextNode(source.slice(index + needle.length)));
+  }
+
   function renderSearchResults() {
     if (!searchResults || !userSearch) return;
     searchResults.innerHTML = '';
@@ -4377,6 +4743,12 @@
       userSearch.removeAttribute('aria-activedescendant');
       return;
     }
+    const query = state.search.query;
+    const groupLabel = document.createElement('div');
+    groupLabel.className = 'search-group-label';
+    groupLabel.textContent = 'کاربران';
+    groupLabel.setAttribute('aria-hidden', 'true');
+    searchResults.appendChild(groupLabel);
     state.search.results.forEach((user, index) => {
       const item = document.createElement('button');
       item.type = 'button';
@@ -4386,7 +4758,15 @@
       item.setAttribute('role', 'option');
       item.setAttribute('aria-selected', 'false');
       const fullName = user.full_name || user.username || 'کاربر';
-      item.textContent = `${fullName} (@${user.username})`;
+      const username = user.username || '';
+      const namePart = document.createElement('span');
+      appendHighlightedText(namePart, fullName, query);
+      const userPart = document.createElement('span');
+      appendHighlightedText(userPart, username, query);
+      item.appendChild(namePart);
+      item.appendChild(document.createTextNode(' (@'));
+      item.appendChild(userPart);
+      item.appendChild(document.createTextNode(')'));
       item.addEventListener('mousedown', (event) => {
         event.preventDefault();
       });
@@ -4414,6 +4794,7 @@
         closeSearchResults({ invalidateRequest: false });
         return;
       }
+      state.search.query = query;
       state.search.results = Array.isArray(res.data.data) ? res.data.data : [];
       state.search.activeIndex = -1;
       renderSearchResults();
@@ -4577,6 +4958,7 @@
         await selectConversation(state.conversations[0]);
       }
       startRealtime();
+      updateNetworkStatus();
       if (!conversationsAutoRefreshTimer) {
         conversationsAutoRefreshTimer = setInterval(() => {
       if (state.token) {

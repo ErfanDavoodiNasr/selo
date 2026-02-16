@@ -224,6 +224,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
 
         <div id="main-view" class="main-view hidden">
+            <div id="network-status" class="network-status hidden" role="status" aria-live="polite"></div>
             <aside class="sidebar">
                 <div class="sidebar-header">
                     <button id="sidebar-menu-btn" class="icon-btn menu-btn" title="منو" aria-label="منو">

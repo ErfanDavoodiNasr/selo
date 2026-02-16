@@ -95,6 +95,33 @@ a:focus-visible {
   overflow: hidden;
 }
 
+.network-status {
+  position: absolute;
+  top: calc(var(--space-2) + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  max-width: min(92vw, 420px);
+  border-radius: 999px;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--fs-meta);
+  font-weight: 700;
+  text-align: center;
+  background: #f59e0b;
+  color: #111827;
+  box-shadow: var(--shadow);
+}
+
+.network-status.offline {
+  background: var(--danger);
+  color: #fff;
+}
+
+.network-status.restored {
+  background: #16a34a;
+  color: #fff;
+}
+
 .sidebar,
 .chat,
 .info-drawer {
@@ -153,6 +180,27 @@ a:focus-visible {
   scrollbar-gutter: stable;
 }
 
+.messages-state {
+  align-self: center;
+  margin: auto 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: 16px;
+  background: var(--panel-light);
+  color: var(--muted-light);
+  box-shadow: var(--shadow);
+  font-size: var(--fs-small);
+  text-align: center;
+  max-width: min(90%, 460px);
+}
+
+.messages-state.loading {
+  background: var(--panel-2);
+}
+
+.messages-state.error {
+  color: var(--danger);
+}
+
 .attachment-preview,
 .reply-bar,
 .voice-recorder,
@@ -183,6 +231,11 @@ a:focus-visible {
   max-width: clamp(240px, 70%, 520px);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.message.pending,
+.message[data-local-status="sending"] {
+  opacity: 0.9;
 }
 
 .message .text {
@@ -825,6 +878,25 @@ body {
   color: var(--tg-muted);
 }
 
+.meta-ticks.sending {
+  color: var(--tg-muted);
+}
+
+.meta-ticks.failed {
+  color: var(--danger);
+}
+
+.message-retry-btn {
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  min-height: 20px;
+}
+
 .composer {
   position: sticky;
   bottom: 0;
@@ -909,6 +981,20 @@ a:focus-visible,
   border-radius: var(--tg-radius-md);
   padding: 8px 12px;
   font-family: var(--tg-font);
+}
+
+.search-group-label {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--tg-muted);
+  border-bottom: 1px solid var(--tg-border);
+  background: var(--tg-surface-alt);
+}
+
+.search-item mark {
+  background: transparent;
+  color: var(--tg-primary);
+  font-weight: 700;
 }
 
 .chat-list {

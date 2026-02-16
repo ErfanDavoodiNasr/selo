@@ -297,7 +297,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $isRelative = strpos($signalingUrlInput, '/') === 0;
                     $isAbsolute = (bool)preg_match('#^(ws|wss|http|https)://#i', $signalingUrlInput);
                     if (!$isRelative && !$isAbsolute) {
-                        $errors[] = 'آدرس سیگنالینگ باید با ws://، wss://، http://، https:// یا / شروع شود.';
+                        $errors[] = 'آدرس سیگنالینگ باید یک مسیر نسبی (شروع با /) یا یک URL کامل معتبر باشد.';
                     }
                 }
             }
@@ -521,7 +521,7 @@ $step4Values = [
                 </label>
                 <div class="hint">در هاست اشتراکی cPanel، تماس صوتی فقط با سرویس خارجی یا Managed قابل استفاده است.</div>
                 <label>آدرس سیگنالینگ تماس</label>
-                <input type="text" id="signaling_url" name="signaling_url" value="<?php echo htmlspecialchars($step4Values['signaling_url'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="wss://signaling.example.com/ws یا /ws">
+                <input type="text" id="signaling_url" name="signaling_url" value="<?php echo htmlspecialchars($step4Values['signaling_url'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="/ws یا آدرس کامل سرویس سیگنالینگ">
                 <label>کلید سیگنالینگ تماس (برای سرویس سیگنالینگ)</label>
                 <div class="input-row">
                     <div class="grow">
@@ -626,8 +626,13 @@ $step4Values = [
                     input.value = secret;
                     input.type = 'text';
                     toggle.checked = true;
+                    input.setCustomValidity('');
                 } else {
-                    alert('مرورگر شما از تولید امن کلید پشتیبانی نمی‌کند.');
+                    input.setCustomValidity('مرورگر شما از تولید امن کلید پشتیبانی نمی‌کند.');
+                    input.reportValidity();
+                    window.setTimeout(function () {
+                        input.setCustomValidity('');
+                    }, 1000);
                 }
             });
         }
