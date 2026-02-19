@@ -1,5 +1,8 @@
 RewriteEngine On
 
+# Preserve Authorization header on Apache/cPanel setups
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
 <IfModule mod_headers.c>
     <FilesMatch "\.(?:css|js|svg|png|jpe?g|gif|webp|woff2?|ttf|eot)$">
         Header set Cache-Control "public, max-age=31536000, immutable"

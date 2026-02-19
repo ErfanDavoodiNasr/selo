@@ -249,9 +249,16 @@
 
   const realtimeConfig = (() => {
     const cfg = window.SELO_CONFIG?.realtime || {};
-    const raw = typeof cfg.mode === 'string' ? cfg.mode.trim().toLowerCase() : 'auto';
-    const mode = ['auto', 'sse', 'poll'].includes(raw) ? raw : 'auto';
-    return { mode };
+    const raw = typeof cfg.mode === 'string' ? cfg.mode.trim().toLowerCase() : 'poll';
+    const mode = ['auto', 'sse', 'poll'].includes(raw) ? raw : 'poll';
+    const sseEnabled = Boolean(cfg.sse_enabled);
+    const minDelayMs = 1200;
+    const maxDelayMs = 8000;
+    const hiddenDelayMs = 4000;
+    const jitterMs = 900;
+    const errorBaseMs = 2000;
+    const errorMaxMs = 10000;
+    return { mode, sseEnabled, minDelayMs, maxDelayMs, hiddenDelayMs, jitterMs, errorBaseMs, errorMaxMs };
   })();
 
   function registerServiceWorker() {
@@ -1353,10 +1360,20 @@
     });
   }
 
+  function getCookie(name) {
+    const escaped = name.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+    const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
   async function apiFetch(path, options = {}) {
     const headers = options.headers || {};
     if (state.token) {
       headers['Authorization'] = 'Bearer ' + state.token;
+    }
+    const csrfToken = getCookie('selo_csrf');
+    if (csrfToken) {
+      headers['X-CSRF-Token'] = csrfToken;
     }
     if (options.body && !(options.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
@@ -1364,6 +1381,7 @@
     }
     const response = await fetch(makeUrl(path), {
       ...options,
+      credentials: 'same-origin',
       headers
     });
     if (response.status === 204) {
@@ -1397,6 +1415,10 @@
       xhr.open('POST', makeUrl(API.uploads));
       if (state.token) {
         xhr.setRequestHeader('Authorization', 'Bearer ' + state.token);
+      }
+      const csrfToken = getCookie('selo_csrf');
+      if (csrfToken) {
+        xhr.setRequestHeader('X-CSRF-Token', csrfToken);
       }
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
@@ -1599,8 +1621,10 @@
     const params = new URLSearchParams({
       last_message_id: state.realtime.lastMessageId,
       last_receipt_id: state.realtime.lastReceiptId,
-      timeout: document.hidden ? 10 : 25
+      timeout: 0,
+      wait: 0
     });
+    let hadError = false;
     try {
       const etag = `m:${state.realtime.lastMessageId}-r:${state.realtime.lastReceiptId}`;
       const res = await apiFetch(API.poll + '?' + params.toString(), { headers: { 'If-None-Match': etag } });
@@ -1617,18 +1641,26 @@
         if (payload.last_receipt_id) {
           state.realtime.lastReceiptId = Math.max(state.realtime.lastReceiptId, payload.last_receipt_id);
         }
-        state.realtime.backoffMs = 1000;
+        state.realtime.backoffMs = realtimeConfig.errorBaseMs;
       }
       updateNetworkStatus();
     } catch (err) {
+      hadError = true;
       state.realtime.connected = false;
       updateNetworkStatus();
-      // ignore and backoff
     }
 
-    const jitter = Math.floor(Math.random() * 500);
-    const delay = Math.min(15000, state.realtime.backoffMs + jitter);
-    state.realtime.backoffMs = Math.min(15000, Math.round(state.realtime.backoffMs * 1.4));
+    let delay;
+    if (hadError) {
+      const jitter = Math.floor(Math.random() * 500);
+      delay = Math.min(realtimeConfig.errorMaxMs, state.realtime.backoffMs + jitter);
+      state.realtime.backoffMs = Math.min(realtimeConfig.errorMaxMs, Math.round(state.realtime.backoffMs * 1.5));
+    } else {
+      const base = document.hidden ? realtimeConfig.hiddenDelayMs : realtimeConfig.minDelayMs;
+      const jitter = Math.floor(Math.random() * realtimeConfig.jitterMs);
+      delay = Math.min(realtimeConfig.maxDelayMs, base + jitter);
+      state.realtime.backoffMs = realtimeConfig.errorBaseMs;
+    }
     state.realtime.pollTimer = setTimeout(pollLoop, delay);
   }
 
@@ -1643,7 +1675,7 @@
     }
     state.realtime.mode = 'poll';
     state.realtime.connected = false;
-    state.realtime.backoffMs = 1000;
+    state.realtime.backoffMs = realtimeConfig.errorBaseMs;
     updateNetworkStatus();
     pollLoop();
   }
@@ -1651,6 +1683,10 @@
   function startRealtime() {
     if (!state.token) return;
     if (realtimeConfig.mode === 'poll') {
+      startPolling(true);
+      return;
+    }
+    if (!realtimeConfig.sseEnabled) {
       startPolling(true);
       return;
     }

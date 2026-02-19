@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}media_files` (
   CONSTRAINT `fk_media_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}media_upload_state` (
+  `media_id` BIGINT UNSIGNED NOT NULL,
+  `state` ENUM('pending', 'attached') NOT NULL DEFAULT 'pending',
+  `pending_expires_at` DATETIME NULL,
+  `attached_at` DATETIME NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`media_id`),
+  KEY `idx_state_exp` (`state`, `pending_expires_at`),
+  CONSTRAINT `fk_media_state_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}conversations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_one_id` INT UNSIGNED NOT NULL,
@@ -136,6 +147,8 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   KEY `idx_conversation` (`conversation_id`),
   KEY `idx_group` (`group_id`),
   KEY `idx_group_created` (`group_id`, `created_at`),
+  KEY `idx_conv_deleted_id` (`conversation_id`, `is_deleted_for_all`, `id`),
+  KEY `idx_group_deleted_id` (`group_id`, `is_deleted_for_all`, `id`),
   KEY `idx_sender` (`sender_id`),
   KEY `idx_recipient` (`recipient_id`),
   KEY `idx_recipient_conv` (`recipient_id`, `conversation_id`, `id`),
@@ -212,6 +225,33 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}login_attempts` (
   `last_attempt_at` DATETIME NOT NULL,
   `lock_until` DATETIME NULL,
   PRIMARY KEY (`id`),
-  KEY `idx_ip` (`ip`),
-  KEY `idx_identifier` (`identifier`)
+  UNIQUE KEY `uniq_ip_identifier` (`ip`, `identifier`),
+  KEY `idx_last_attempt` (`last_attempt_at`),
+  KEY `idx_lock_until` (`lock_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}reaction_rate_limits` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `ip` VARCHAR(45) NOT NULL,
+  `identifier` VARCHAR(190) NOT NULL,
+  `attempts` INT UNSIGNED NOT NULL DEFAULT 0,
+  `last_attempt_at` DATETIME NOT NULL,
+  `lock_until` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_ip_identifier` (`ip`, `identifier`),
+  KEY `idx_last_attempt` (`last_attempt_at`),
+  KEY `idx_lock_until` (`lock_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}endpoint_rate_limits` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `identifier` VARCHAR(255) NOT NULL,
+  `attempts` INT UNSIGNED NOT NULL DEFAULT 0,
+  `penalty_level` INT UNSIGNED NOT NULL DEFAULT 0,
+  `last_attempt_at` DATETIME NOT NULL,
+  `lock_until` DATETIME NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_identifier` (`identifier`),
+  KEY `idx_last_attempt` (`last_attempt_at`),
+  KEY `idx_lock_until` (`lock_until`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

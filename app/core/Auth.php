@@ -4,6 +4,7 @@ namespace App\Core;
 class Auth
 {
     private static $user;
+    private static $authSource = null;
 
     public static function issueToken(array $user, array $config): string
     {
@@ -30,11 +31,13 @@ class Auth
         if (self::$user !== null) {
             return self::$user;
         }
-        $token = self::getBearerToken();
+        $auth = self::resolveRequestToken();
+        $token = $auth['token'];
         if (!$token) {
             return null;
         }
         $user = self::userFromToken($config, $token);
+        self::$authSource = $user ? $auth['source'] : null;
         self::$user = $user ?: null;
         return self::$user;
     }
@@ -61,19 +64,45 @@ class Auth
         if (!$user) {
             Response::json(['ok' => false, 'error' => 'احراز هویت نامعتبر است.'], 401);
         }
+        if (self::$authSource === 'cookie' && self::isStateChangingMethod() && !self::hasValidCsrfToken()) {
+            Response::json(['ok' => false, 'error' => 'توکن CSRF نامعتبر است.'], 403);
+        }
         return $user;
     }
 
-    private static function getBearerToken(): ?string
+    private static function resolveRequestToken(): array
     {
         $header = Request::header('Authorization');
-        if (!$header) {
-            return null;
+        if ($header && preg_match('/Bearer\s+(.+)$/i', $header, $matches)) {
+            return ['token' => trim($matches[1]), 'source' => 'header'];
         }
-        if (preg_match('/Bearer\s+(.*)$/i', $header, $matches)) {
-            return trim($matches[1]);
+        $cookieToken = $_COOKIE['selo_token'] ?? null;
+        if (is_string($cookieToken)) {
+            $cookieToken = trim($cookieToken);
+            if ($cookieToken !== '') {
+                return ['token' => $cookieToken, 'source' => 'cookie'];
+            }
         }
-        return null;
+        return ['token' => null, 'source' => null];
+    }
+
+    private static function isStateChangingMethod(): bool
+    {
+        $method = Request::method();
+        return in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true);
+    }
+
+    private static function hasValidCsrfToken(): bool
+    {
+        $cookieToken = $_COOKIE['selo_csrf'] ?? null;
+        if (!is_string($cookieToken) || trim($cookieToken) === '') {
+            return false;
+        }
+        $headerToken = Request::header('X-CSRF-Token');
+        if (!is_string($headerToken) || trim($headerToken) === '') {
+            return false;
+        }
+        return hash_equals($cookieToken, trim($headerToken));
     }
 
     private static function decodeToken(string $token, string $secret): ?array

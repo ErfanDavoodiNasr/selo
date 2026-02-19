@@ -69,13 +69,12 @@ class ConversationController
                 FROM ' . $config['db']['prefix'] . 'groups g
                 JOIN ' . $config['db']['prefix'] . 'group_members gm
                     ON gm.group_id = g.id AND gm.user_id = ? AND gm.status = ?
-                LEFT JOIN (
-                    SELECT group_id, MAX(id) AS last_message_id
-                    FROM ' . $config['db']['prefix'] . 'messages
-                    WHERE group_id IS NOT NULL AND is_deleted_for_all = 0
-                    GROUP BY group_id
-                ) lm ON lm.group_id = g.id
-                LEFT JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = lm.last_message_id
+                LEFT JOIN ' . $config['db']['prefix'] . 'messages m
+                    ON m.id = (
+                        SELECT MAX(m2.id)
+                        FROM ' . $config['db']['prefix'] . 'messages m2
+                        WHERE m2.group_id = g.id AND m2.is_deleted_for_all = 0
+                    )
                 LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'users su ON su.id = m.sender_id';
         $gStmt = $pdo->prepare($groupSql);

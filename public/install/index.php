@@ -3,6 +3,8 @@ session_start();
 
 $basePath = dirname(__DIR__, 2);
 $configFile = $basePath . '/config/config.php';
+$installLogFile = $basePath . '/storage/logs/install.log';
+$installTokenUsedFile = $basePath . '/storage/install_token_used.flag';
 $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
 $scriptDir = rtrim(dirname($scriptName), '/');
 $scriptBase = basename($scriptName);
@@ -29,6 +31,107 @@ function installUrl(string $query = ''): string
     }
     return rtrim($installBaseUrl, '/') . '/?' . $query;
 }
+
+function h(string $value): string
+{
+    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
+}
+
+function installLog(string $message): void
+{
+    global $installLogFile;
+    $dir = dirname($installLogFile);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL;
+    @file_put_contents($installLogFile, $line, FILE_APPEND);
+}
+
+function isValidIp(string $ip): bool
+{
+    return $ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) !== false;
+}
+
+function isAllowedInstallerIp(string $ip): bool
+{
+    $raw = trim((string)getenv('SELO_INSTALL_ALLOWED_IPS'));
+    if ($raw === '') {
+        return $ip === '127.0.0.1' || $ip === '::1';
+    }
+    $allowed = array_filter(array_map('trim', explode(',', $raw)));
+    return in_array($ip, $allowed, true);
+}
+
+function requestInstallerToken(): ?string
+{
+    if (isset($_REQUEST['install_token']) && is_string($_REQUEST['install_token'])) {
+        return trim($_REQUEST['install_token']);
+    }
+    if (isset($_SERVER['HTTP_X_INSTALL_TOKEN']) && is_string($_SERVER['HTTP_X_INSTALL_TOKEN'])) {
+        return trim($_SERVER['HTTP_X_INSTALL_TOKEN']);
+    }
+    return null;
+}
+
+function enforceInstallerAccess(): void
+{
+    global $installTokenUsedFile;
+
+    $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    if (!isValidIp($ip)) {
+        $ip = '-';
+    }
+
+    if (isAllowedInstallerIp($ip)) {
+        return;
+    }
+
+    $requiredToken = trim((string)getenv('SELO_INSTALL_TOKEN'));
+    if ($requiredToken === '') {
+        installLog('installer_access_denied ip=' . $ip . ' reason=missing_token_and_ip_not_allowed');
+        http_response_code(403);
+        echo 'Installer access denied.';
+        exit;
+    }
+
+    if (is_file($installTokenUsedFile)) {
+        installLog('installer_access_denied ip=' . $ip . ' reason=token_already_used');
+        http_response_code(403);
+        echo 'Installer token already used.';
+        exit;
+    }
+
+    if (!empty($_SESSION['installer_token_valid']) && $_SESSION['installer_token_valid'] === true) {
+        return;
+    }
+
+    $provided = requestInstallerToken();
+    if ($provided === null || !hash_equals($requiredToken, $provided)) {
+        installLog('installer_access_denied ip=' . $ip . ' reason=invalid_token');
+        http_response_code(403);
+        echo 'Installer token required.';
+        exit;
+    }
+
+    $_SESSION['installer_token_valid'] = true;
+    installLog('installer_token_validated ip=' . $ip);
+}
+
+function consumeInstallerToken(string $ip): void
+{
+    global $installTokenUsedFile;
+
+    if (is_file($installTokenUsedFile)) {
+        return;
+    }
+
+    @file_put_contents($installTokenUsedFile, date('c') . ' ' . $ip);
+    installLog('installer_token_consumed ip=' . $ip);
+}
+
+enforceInstallerAccess();
+
 if (file_exists($configFile)) {
     $config = require $configFile;
     if (!empty($config['installed'])) {
@@ -198,7 +301,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . installUrl('step=3'));
                 exit;
             } catch (Exception $e) {
-                $errors[] = 'اتصال یا ایجاد جداول ناموفق بود: ' . $e->getMessage();
+                installLog('db_setup_failed step=2 error=' . $e->getMessage());
+                $errors[] = 'اتصال یا ایجاد جداول ناموفق بود. لطفاً تنظیمات را بررسی کنید.';
             }
         }
     }
@@ -227,29 +331,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$db) {
                 $errors[] = 'اطلاعات پایگاه داده یافت نشد.';
             } else {
-                $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4', $db['host'], $db['name']);
-                $pdo = new PDO($dsn, $db['user'], $db['pass'], [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                ]);
-                $pdo->exec('SET NAMES utf8mb4');
+                try {
+                    $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4', $db['host'], $db['name']);
+                    $pdo = new PDO($dsn, $db['user'], $db['pass'], [
+                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    ]);
+                    $pdo->exec('SET NAMES utf8mb4');
 
-                if ($createAdmin) {
-                    $stmt = $pdo->prepare('SELECT id FROM ' . $db['prefix'] . 'users WHERE username = ? OR email = ? LIMIT 1');
-                    $stmt->execute([$username, $email]);
-                    if ($stmt->fetch()) {
-                        $errors[] = 'کاربر با این نام کاربری یا ایمیل وجود دارد.';
-                    } else {
-                        $hash = password_hash($password, PASSWORD_BCRYPT);
-                        $now = date('Y-m-d H:i:s');
-                        $insert = $pdo->prepare('INSERT INTO ' . $db['prefix'] . 'users (full_name, username, email, password_hash, language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-                        $insert->execute([$fullName, $username, $email, $hash, 'fa', $now, $now]);
+                    if ($createAdmin) {
+                        $stmt = $pdo->prepare('SELECT id FROM ' . $db['prefix'] . 'users WHERE username = ? OR email = ? LIMIT 1');
+                        $stmt->execute([$username, $email]);
+                        if ($stmt->fetch()) {
+                            $errors[] = 'کاربر با این نام کاربری یا ایمیل وجود دارد.';
+                        } else {
+                            $hash = password_hash($password, PASSWORD_BCRYPT);
+                            $now = date('Y-m-d H:i:s');
+                            $insert = $pdo->prepare('INSERT INTO ' . $db['prefix'] . 'users (full_name, username, email, password_hash, language, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+                            $insert->execute([$fullName, $username, $email, $hash, 'fa', $now, $now]);
+                        }
                     }
-                }
 
-                if (empty($errors)) {
-                    header('Location: ' . installUrl('step=4'));
-                    exit;
+                    if (empty($errors)) {
+                        header('Location: ' . installUrl('step=4'));
+                        exit;
+                    }
+                } catch (Exception $e) {
+                    installLog('db_admin_setup_failed step=3 error=' . $e->getMessage());
+                    $errors[] = 'انجام عملیات پایگاه داده ناموفق بود.';
                 }
             }
         }
@@ -305,6 +414,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     mkdir($basePath . '/config', 0755, true);
                 }
                 file_put_contents($configFile, $export);
+                $requestIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+                if (!isValidIp($requestIp)) {
+                    $requestIp = '-';
+                }
+                consumeInstallerToken($requestIp);
                 $_SESSION['install_done'] = true;
                 header('Location: ' . installUrl('step=finish'));
                 exit;
@@ -407,7 +521,11 @@ $step4Values = [
         </div>
 
         <?php if (!empty($errors)): ?>
-            <div class="error"><?php echo implode('<br>', $errors); ?></div>
+            <div class="error">
+                <?php foreach ($errors as $err): ?>
+                    <?php echo h((string)$err); ?><br>
+                <?php endforeach; ?>
+            </div>
         <?php endif; ?>
 
         <?php if ($stepView === '1'): ?>

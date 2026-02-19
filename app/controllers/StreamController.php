@@ -18,120 +18,12 @@ class StreamController
         if (!$user) {
             Response::json(['ok' => false, 'error' => 'احراز هویت نامعتبر است.'], 401);
         }
-
-        @set_time_limit(0);
-        @ini_set('output_buffering', 'off');
-        @ini_set('zlib.output_compression', '0');
-        while (ob_get_level() > 0) {
-            ob_end_flush();
+        $sseEnabled = (bool)($config['realtime']['sse_enabled'] ?? false);
+        if (!$sseEnabled) {
+            http_response_code(204);
+            exit;
         }
-
-        header('Content-Type: text/event-stream; charset=utf-8');
-        header('Cache-Control: no-cache, no-store, must-revalidate');
-        header('Pragma: no-cache');
-        header('Connection: keep-alive');
-        header('X-Accel-Buffering: no');
-
-        $lastMessageId = max(0, (int)Request::param('last_message_id', 0));
-        $lastReceiptId = max(0, (int)Request::param('last_receipt_id', 0));
-        $lastEventId = Request::header('Last-Event-ID') ?? Request::param('last_event_id', null);
-        if ($lastEventId) {
-            self::applyLastEventId($lastEventId, $lastMessageId, $lastReceiptId);
-        }
-
-        $retryMs = (int)($config['realtime']['sse_retry_ms'] ?? 2000);
-        $heartbeat = (int)($config['realtime']['sse_heartbeat_seconds'] ?? 20);
-        $maxSeconds = (int)($config['realtime']['sse_max_seconds'] ?? 55);
-        $pollActiveMs = max(100, min(1000, (int)($config['realtime']['sse_poll_active_ms'] ?? 300)));
-        $pollMinMs = max($pollActiveMs, min(5000, (int)($config['realtime']['sse_poll_min_ms'] ?? 1000)));
-        $pollMaxMs = max($pollMinMs, min(15000, (int)($config['realtime']['sse_poll_max_ms'] ?? 5000)));
-        $pollJitterMs = max(0, min(1000, (int)($config['realtime']['sse_poll_jitter_ms'] ?? 150)));
-        $receiptPollMs = max($pollActiveMs, min(10000, (int)($config['realtime']['sse_receipt_poll_ms'] ?? 2000)));
-        $pingInterval = (int)($config['presence']['ping_interval_seconds'] ?? 15);
-        $pingInterval = max(5, min(300, $pingInterval));
-
-        echo 'retry: ' . $retryMs . "\n\n";
-        self::emitEvent('hello', null, [
-            'server_time' => date('c'),
-            'last_message_id' => $lastMessageId,
-            'last_receipt_id' => $lastReceiptId,
-        ]);
-
-        $startAt = microtime(true);
-        $lastPingAt = 0.0;
-        $lastPresenceAt = 0.0;
-        $nextPollAt = $startAt;
-        $nextReceiptPollAt = $startAt;
-        $idleRounds = 0;
-
-        while (true) {
-            $now = microtime(true);
-            if (connection_aborted()) {
-                break;
-            }
-            if (($now - $lastPresenceAt) >= $pingInterval) {
-                PresenceService::ping($config, (int)$user['id']);
-                $lastPresenceAt = $now;
-            }
-
-            if (($now - $lastPingAt) >= $heartbeat) {
-                echo ": ping\n\n";
-                @ob_flush();
-                @flush();
-                $lastPingAt = $now;
-            }
-
-            if ($now >= $nextPollAt) {
-                $includeReceipts = $now >= $nextReceiptPollAt;
-                $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId, $includeReceipts);
-
-                if (!empty($events['messages'])) {
-                    foreach ($events['messages'] as $msg) {
-                        $lastMessageId = max($lastMessageId, (int)$msg['id']);
-                        self::emitEvent('message', 'm-' . $msg['id'], $msg);
-                    }
-                }
-                if (!empty($events['receipts'])) {
-                    foreach ($events['receipts'] as $receipt) {
-                        $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
-                        self::emitEvent('receipt', 'r-' . $receipt['id'], $receipt);
-                    }
-                }
-
-                if ($includeReceipts) {
-                    $nextReceiptPollAt = $now + ($receiptPollMs / 1000);
-                }
-
-                $hasEvents = !empty($events['messages']) || !empty($events['receipts']);
-                if ($hasEvents) {
-                    $idleRounds = 0;
-                    $nextDelayMs = $pollActiveMs;
-                } else {
-                    $idleRounds = min(6, $idleRounds + 1);
-                    $nextDelayMs = min($pollMaxMs, $pollMinMs * (1 << ($idleRounds - 1)));
-                }
-
-                if ($pollJitterMs > 0) {
-                    $nextDelayMs += random_int(0, $pollJitterMs);
-                }
-                $nextPollAt = $now + ($nextDelayMs / 1000);
-            }
-
-            if (($now - $startAt) >= $maxSeconds) {
-                break;
-            }
-
-            $now = microtime(true);
-            $deadlineAt = $startAt + $maxSeconds;
-            if ($now >= $deadlineAt) {
-                break;
-            }
-            $nextHeartbeatAt = $lastPingAt + $heartbeat;
-            $wakeAt = min($nextPollAt, $nextHeartbeatAt, $deadlineAt);
-            $sleepSeconds = max(0.05, min(1.0, $wakeAt - $now));
-            usleep((int)($sleepSeconds * 1000000));
-        }
-        exit;
+        Response::json(['ok' => false, 'error' => 'SSE در این محیط غیرفعال است.'], 409);
     }
 
     public static function poll(array $config): void
@@ -142,58 +34,91 @@ class StreamController
         }
         PresenceService::ping($config, (int)$user['id']);
 
-        $lastMessageId = max(0, (int)Request::param('last_message_id', 0));
-        $lastReceiptId = max(0, (int)Request::param('last_receipt_id', 0));
-        $timeout = (int)Request::param('timeout', 25);
-        $timeout = max(0, min(30, $timeout));
-        $wait = Request::param('wait', '1') !== '0';
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $userId = (int)$user['id'];
+        $perUserLimit = max(1, min(4, (int)($config['realtime']['poll_per_user_concurrency'] ?? 1)));
+        $perIpLimit = max(1, min(12, (int)($config['realtime']['poll_per_ip_concurrency'] ?? 4)));
 
-        $etag = 'm:' . $lastMessageId . '-r:' . $lastReceiptId;
-        header('ETag: ' . $etag);
-        $ifNoneMatch = Request::header('If-None-Match');
-        if (!$wait && $ifNoneMatch && trim($ifNoneMatch) === $etag) {
-            http_response_code(304);
-            exit;
+        $userLock = self::acquireConcurrencyLock('user', (string)$userId, $perUserLimit);
+        if ($userLock === null) {
+            Response::json(['ok' => false, 'error' => 'تعداد درخواست‌های همزمان زیاد است.'], 429);
+        }
+        $ipLock = self::acquireConcurrencyLock('ip', $ip, $perIpLimit);
+        if ($ipLock === null) {
+            self::releaseLock($userLock);
+            Response::json(['ok' => false, 'error' => 'فشار درخواست از این IP زیاد است.'], 429);
         }
 
-        $start = time();
-        $events = ['messages' => [], 'receipts' => []];
-        do {
-            $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId, true);
-            if (!empty($events['messages']) || !empty($events['receipts'])) {
-                break;
-            }
-            if (!$wait || $timeout === 0) {
-                break;
-            }
-            usleep(250000);
-        } while ((time() - $start) < $timeout);
+        $status = 200;
+        $payload = null;
+        try {
+            $lastMessageId = max(0, (int)Request::param('last_message_id', 0));
+            $lastReceiptId = max(0, (int)Request::param('last_receipt_id', 0));
+            $events = self::collectEvents($config, $userId, $lastMessageId, $lastReceiptId, true);
 
-        if (empty($events['messages']) && empty($events['receipts'])) {
-            http_response_code(204);
-            exit;
-        }
+            if (empty($events['messages']) && empty($events['receipts'])) {
+                $status = 204;
+                return;
+            }
 
-        if (!empty($events['messages'])) {
             foreach ($events['messages'] as $msg) {
                 $lastMessageId = max($lastMessageId, (int)$msg['id']);
             }
-        }
-        if (!empty($events['receipts'])) {
             foreach ($events['receipts'] as $receipt) {
                 $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
             }
+
+            $payload = [
+                'ok' => true,
+                'data' => [
+                    'messages' => $events['messages'],
+                    'receipts' => $events['receipts'],
+                    'last_message_id' => $lastMessageId,
+                    'last_receipt_id' => $lastReceiptId,
+                ],
+            ];
+        } finally {
+            self::releaseLock($ipLock);
+            self::releaseLock($userLock);
         }
 
-        Response::json([
-            'ok' => true,
-            'data' => [
-                'messages' => $events['messages'],
-                'receipts' => $events['receipts'],
-                'last_message_id' => $lastMessageId,
-                'last_receipt_id' => $lastReceiptId,
-            ],
-        ]);
+        if ($status === 204) {
+            http_response_code(204);
+            exit;
+        }
+        Response::json($payload, 200);
+    }
+
+    private static function acquireConcurrencyLock(string $scope, string $id, int $limit): ?array
+    {
+        $dir = rtrim(sys_get_temp_dir(), '/\\') . '/selo-realtime-locks';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0770, true);
+        }
+        $key = sha1($scope . ':' . $id);
+        for ($slot = 0; $slot < $limit; $slot++) {
+            $path = $dir . '/' . $scope . '-' . $key . '-' . $slot . '.lock';
+            $fh = @fopen($path, 'c');
+            if (!is_resource($fh)) {
+                continue;
+            }
+            if (@flock($fh, LOCK_EX | LOCK_NB)) {
+                @ftruncate($fh, 0);
+                @fwrite($fh, (string)getmypid());
+                return ['handle' => $fh];
+            }
+            @fclose($fh);
+        }
+        return null;
+    }
+
+    private static function releaseLock(?array $lock): void
+    {
+        if ($lock === null || !isset($lock['handle']) || !is_resource($lock['handle'])) {
+            return;
+        }
+        @flock($lock['handle'], LOCK_UN);
+        @fclose($lock['handle']);
     }
 
     private static function resolveUser(array $config): ?array
@@ -213,28 +138,6 @@ class StreamController
         return Auth::userFromToken($config, $cookieToken);
     }
 
-    private static function applyLastEventId(string $lastEventId, int &$lastMessageId, int &$lastReceiptId): void
-    {
-        if (preg_match('/^m-(\d+)$/', $lastEventId, $matches)) {
-            $lastMessageId = max($lastMessageId, (int)$matches[1]);
-            return;
-        }
-        if (preg_match('/^r-(\d+)$/', $lastEventId, $matches)) {
-            $lastReceiptId = max($lastReceiptId, (int)$matches[1]);
-        }
-    }
-
-    private static function emitEvent(string $event, ?string $id, array $payload): void
-    {
-        if ($id) {
-            echo 'id: ' . $id . "\n";
-        }
-        echo 'event: ' . $event . "\n";
-        echo 'data: ' . json_encode($payload, JSON_UNESCAPED_UNICODE) . "\n\n";
-        @ob_flush();
-        @flush();
-    }
-
     private static function collectEvents(array $config, int $userId, int $lastMessageId, int $lastReceiptId, bool $includeReceipts = true): array
     {
         $messages = self::fetchMessages($config, $userId, $lastMessageId);
@@ -245,12 +148,13 @@ class StreamController
     private static function fetchReceipts(array $config, int $userId, int $lastReceiptId): array
     {
         $pdo = Database::pdo();
+        $limit = max(20, min(100, (int)($config['realtime']['stream_receipt_limit'] ?? 80)));
         $sql = 'SELECT mr.id, mr.message_id, mr.user_id, mr.status, mr.created_at
             FROM ' . $config['db']['prefix'] . 'message_receipts mr
             JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = mr.message_id
             WHERE mr.id > ? AND m.sender_id = ?
             ORDER BY mr.id ASC
-            LIMIT 200';
+            LIMIT ' . $limit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$lastReceiptId, $userId]);
         $rows = $stmt->fetchAll();
@@ -266,8 +170,8 @@ class StreamController
     private static function fetchMessages(array $config, int $userId, int $lastMessageId): array
     {
         $pdo = Database::pdo();
-        $params = [$userId, 'active', $lastMessageId, $userId, $userId, $userId];
-        $sql = 'SELECT m.id, m.conversation_id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.recipient_id, m.reply_to_message_id, m.created_at,
+        $limit = max(20, min(100, (int)($config['realtime']['stream_message_limit'] ?? 60)));
+        $baseSelect = 'SELECT m.id, m.conversation_id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.recipient_id, m.reply_to_message_id, m.created_at,
                 su.full_name AS sender_name,
                 sup.id AS sender_photo_id,
                 ru.id AS reply_id, ru.type AS reply_type, ru.body AS reply_body, ru.sender_id AS reply_sender_id,
@@ -288,21 +192,35 @@ class StreamController
                 LEFT JOIN ' . $config['db']['prefix'] . 'messages ru ON ru.id = m.reply_to_message_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'users ruser ON ruser.id = ru.sender_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'media_files rmedia ON rmedia.id = ru.media_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
-                WHERE m.id > ?
-                  AND m.is_deleted_for_all = 0
-                  AND (
-                    (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
-                    OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
-                    WHERE md.message_id = m.id AND md.user_id = ?
-                  )
-                ORDER BY m.id ASC
-                LIMIT 200';
+                LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id';
+
+        $sql = 'SELECT * FROM (
+                    ' . $baseSelect . '
+                    JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                    WHERE m.id > ?
+                      AND m.is_deleted_for_all = 0
+                      AND (c.user_one_id = ? OR c.user_two_id = ?)
+                      AND NOT EXISTS (
+                        SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                        WHERE md.message_id = m.id AND md.user_id = ?
+                      )
+                    UNION ALL
+                    ' . $baseSelect . '
+                    JOIN ' . $config['db']['prefix'] . 'group_members gm
+                      ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+                    WHERE m.id > ?
+                      AND m.is_deleted_for_all = 0
+                      AND NOT EXISTS (
+                        SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                        WHERE md.message_id = m.id AND md.user_id = ?
+                      )
+                ) q
+                ORDER BY q.id ASC
+                LIMIT ' . $limit;
+        $params = [
+            $lastMessageId, $userId, $userId, $userId,
+            $userId, 'active', $lastMessageId, $userId,
+        ];
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $messages = $stmt->fetchAll();
@@ -345,9 +263,21 @@ class StreamController
         }
         unset($row);
 
-        $messages = MessageReactionService::hydrate($config, $messages, $userId);
         $messages = MessageAttachmentService::hydrate($config, $messages);
-        $messages = MessageReceiptService::hydrate($config, $messages, $userId);
+        $hydrateMax = max(10, min(100, (int)($config['realtime']['stream_hydrate_max_messages'] ?? 40)));
+        if (count($messages) <= $hydrateMax) {
+            $messages = MessageReactionService::hydrate($config, $messages, $userId);
+            $messages = MessageReceiptService::hydrate($config, $messages, $userId);
+        } else {
+            foreach ($messages as &$msg) {
+                $msg['reactions'] = [];
+                $msg['current_user_reaction'] = null;
+                if (!isset($msg['receipt'])) {
+                    $msg['receipt'] = null;
+                }
+            }
+            unset($msg);
+        }
 
         return $messages;
     }

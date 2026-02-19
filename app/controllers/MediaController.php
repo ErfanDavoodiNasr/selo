@@ -23,26 +23,53 @@ class MediaController
         $download = isset($_GET['download']) && $_GET['download'] === '1';
 
         $pdo = Database::pdo();
-        $sql = 'SELECT DISTINCT mf.id, mf.file_name, mf.original_name, mf.mime_type, mf.type, mf.thumbnail_name
+        $sql = 'SELECT mf.id, mf.file_name, mf.original_name, mf.mime_type, mf.type, mf.thumbnail_name
                 FROM ' . $config['db']['prefix'] . 'media_files mf
-                LEFT JOIN ' . $config['db']['prefix'] . 'message_attachments ma ON ma.media_id = mf.id
-                LEFT JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = ma.message_id OR m.media_id = mf.id
-                LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
                 WHERE mf.id = ?
-                  AND m.id IS NOT NULL
                   AND (
-                    (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
-                    OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
-                  )
-                  AND m.is_deleted_for_all = 0
-                  AND NOT EXISTS (
-                      SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
-                      WHERE md.message_id = m.id AND md.user_id = ?
+                    EXISTS (
+                      SELECT 1
+                      FROM ' . $config['db']['prefix'] . 'messages m
+                      LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                      LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                        ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+                      WHERE m.media_id = mf.id
+                        AND m.is_deleted_for_all = 0
+                        AND (
+                          (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
+                          OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                          WHERE md.message_id = m.id AND md.user_id = ?
+                        )
+                    )
+                    OR EXISTS (
+                      SELECT 1
+                      FROM ' . $config['db']['prefix'] . 'message_attachments ma
+                      JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = ma.message_id
+                      LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                      LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                        ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
+                      WHERE ma.media_id = mf.id
+                        AND m.is_deleted_for_all = 0
+                        AND (
+                          (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
+                          OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                          WHERE md.message_id = m.id AND md.user_id = ?
+                        )
+                    )
                   )
                 LIMIT 1';
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$user['id'], 'active', $mediaId, $user['id'], $user['id'], $user['id']]);
+        $stmt->execute([
+            $mediaId,
+            $user['id'], 'active', $user['id'], $user['id'], $user['id'],
+            $user['id'], 'active', $user['id'], $user['id'], $user['id'],
+        ]);
         $media = $stmt->fetch();
         if (!$media) {
             $existsStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'media_files WHERE id = ? LIMIT 1');

@@ -15,6 +15,12 @@ class AuthController
 {
     public static function register(array $config): void
     {
+        self::enforceBodyLimit($config, 'register');
+        if (RateLimiter::endpointIsLimited($config, 'register', null)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'register', null);
+
         $data = Request::json();
         $fullName = trim($data['full_name'] ?? '');
         $username = strtolower(trim($data['username'] ?? ''));
@@ -55,15 +61,21 @@ class AuthController
         $userId = $pdo->lastInsertId();
         $user = ['id' => (int)$userId, 'full_name' => $fullName, 'username' => $username, 'email' => $email];
         $token = Auth::issueToken($user, $config);
-        self::setAuthCookie($config, $token);
+        $csrfToken = self::setAuthCookies($config, $token);
         LastSeenService::touch($config, (int)$userId);
 
         Logger::info('register_success', ['user_id' => (int)$userId, 'username' => $username], 'auth');
-        Response::json(['ok' => true, 'data' => ['token' => $token]]);
+        Response::json(['ok' => true, 'data' => ['token' => $token, 'csrf_token' => $csrfToken]]);
     }
 
     public static function login(array $config): void
     {
+        self::enforceBodyLimit($config, 'login');
+        if (RateLimiter::endpointIsLimited($config, 'login', null)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'login', null);
+
         $data = Request::json();
         $identifier = strtolower(trim($data['identifier'] ?? ''));
         $password = $data['password'] ?? '';
@@ -92,13 +104,13 @@ class AuthController
 
         RateLimiter::clear($ip, $identifier, $config);
         $token = Auth::issueToken($user, $config);
-        self::setAuthCookie($config, $token);
+        $csrfToken = self::setAuthCookies($config, $token);
         LastSeenService::touch($config, (int)$user['id']);
         Logger::info('login_success', ['user_id' => (int)$user['id'], 'username' => $user['username']], 'auth');
-        Response::json(['ok' => true, 'data' => ['token' => $token]]);
+        Response::json(['ok' => true, 'data' => ['token' => $token, 'csrf_token' => $csrfToken]]);
     }
 
-    private static function setAuthCookie(array $config, string $token): void
+    private static function setAuthCookies(array $config, string $token): string
     {
         $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? (60 * 60 * 24 * 7));
         if ($ttlSeconds <= 0) {
@@ -113,5 +125,31 @@ class AuthController
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
+        $csrfToken = self::generateCsrfToken();
+        setcookie('selo_csrf', $csrfToken, [
+            'expires' => time() + $ttlSeconds,
+            'path' => '/',
+            'secure' => $secure,
+            'httponly' => false,
+            'samesite' => 'Lax',
+        ]);
+        return $csrfToken;
     }
+
+    private static function generateCsrfToken(): string
+    {
+        return bin2hex(random_bytes(32));
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
+    }
+
 }

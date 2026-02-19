@@ -3,10 +3,13 @@ namespace App\Controllers;
 
 use App\Core\Auth;
 use App\Core\Database;
+use App\Core\MediaLifecycleService;
 use App\Core\UploadPaths;
 use App\Core\Response;
 use App\Core\Logger;
 use App\Core\ImageSafety;
+use App\Core\RateLimiter;
+use App\Core\Request;
 
 class UploadController
 {
@@ -16,12 +19,19 @@ class UploadController
     public static function upload(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::enforceBodyLimit($config);
+        if (RateLimiter::endpointIsLimited($config, 'upload', (int)$user['id'])) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'upload', (int)$user['id']);
 
         $files = self::collectFiles();
         if (empty($files)) {
             Logger::warn('upload_failed', ['reason' => 'missing_file'], 'upload');
             Response::json(['ok' => false, 'error' => 'فایل ارسال نشده است.'], 422);
         }
+
+        MediaLifecycleService::cleanupExpiredPending($config);
 
         $uploadsCfg = $config['uploads'] ?? [];
         $maxFiles = (int)($uploadsCfg['max_files_per_request'] ?? self::DEFAULT_MAX_FILES);
@@ -57,6 +67,8 @@ class UploadController
         }
 
         $items = [];
+        $incomingBytes = self::sumIncomingBytes($files);
+        MediaLifecycleService::enforceUploadQuotas($config, (int)$user['id'], $incomingBytes);
         foreach ($files as $index => $file) {
             if ($file['error'] !== UPLOAD_ERR_OK) {
                 Logger::warn('upload_failed', ['reason' => 'upload_error', 'code' => $file['error']], 'upload');
@@ -176,6 +188,7 @@ class UploadController
                 $now,
             ]);
             $mediaId = (int)$pdo->lastInsertId();
+            MediaLifecycleService::markPending($config, $mediaId);
 
             Logger::info('upload_success', [
                 'media_id' => $mediaId,
@@ -212,6 +225,15 @@ class UploadController
             'ok' => true,
             'data' => $items[0],
         ]);
+    }
+
+    private static function sumIncomingBytes(array $files): int
+    {
+        $sum = 0;
+        foreach ($files as $file) {
+            $sum += max(0, (int)($file['size'] ?? 0));
+        }
+        return $sum;
     }
 
     private static function collectFiles(): array
@@ -506,5 +528,16 @@ class UploadController
             return null;
         }
         return $seconds;
+    }
+
+    private static function enforceBodyLimit(array $config): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes']['upload'] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
     }
 }

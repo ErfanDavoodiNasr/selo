@@ -7,6 +7,7 @@ use App\Core\MessageAttachmentService;
 use App\Core\MessageMediaService;
 use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
+use App\Core\MediaLifecycleService;
 use App\Core\LastSeenService;
 use App\Core\Request;
 use App\Core\Response;
@@ -118,6 +119,12 @@ class MessageController
     public static function send(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::enforceBodyLimit($config, 'send');
+        if (RateLimiter::endpointIsLimited($config, 'send', (int)$user['id'])) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'send', (int)$user['id']);
+
         LastSeenService::touch($config, (int)$user['id']);
         $data = Request::json();
         $conversationId = (int)($data['conversation_id'] ?? 0);
@@ -125,6 +132,7 @@ class MessageController
         $body = trim($data['body'] ?? '');
         $clientId = trim((string)($data['client_id'] ?? ''));
         $mediaIds = MessageMediaService::normalizeMediaIds($data['media_ids'] ?? [], isset($data['media_id']) ? (int)$data['media_id'] : null);
+        self::enforceArrayLimit($config, 'send_media_ids', $mediaIds);
         $replyTo = isset($data['reply_to_message_id']) ? (int)$data['reply_to_message_id'] : null;
 
         if ($conversationId <= 0) {
@@ -220,6 +228,7 @@ class MessageController
                     $attInsert->execute([$messageId, $mid, $sort, $now]);
                     $sort++;
                 }
+                MediaLifecycleService::markAttached($config, $mediaIds);
             }
 
             $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
@@ -241,11 +250,18 @@ class MessageController
     public static function ack(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::enforceBodyLimit($config, 'ack');
+        if (RateLimiter::endpointIsLimited($config, 'ack', (int)$user['id'])) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'ack', (int)$user['id']);
+
         $data = Request::json();
         $messageIds = $data['message_ids'] ?? [];
         if (!is_array($messageIds)) {
             Response::json(['ok' => false, 'error' => 'لیست پیام نامعتبر است.'], 422);
         }
+        self::enforceArrayLimit($config, 'ack_message_ids', $messageIds);
         $status = strtolower(trim($data['status'] ?? ''));
         if (!in_array($status, ['delivered', 'seen'], true)) {
             Response::json(['ok' => false, 'error' => 'وضعیت نامعتبر است.'], 422);
@@ -474,10 +490,10 @@ class MessageController
 
         $ip = LogContext::getIp() ?: 'unknown';
         $identifier = 'reaction:' . $user['id'] . ':' . $messageId;
-        if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes)) {
+        if (RateLimiter::tooManyReactionAttempts($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes)) {
             Response::json(['ok' => false, 'error' => 'تعداد درخواست‌ها زیاد است. کمی بعد تلاش کنید.'], 429);
         }
-        RateLimiter::hitCustom($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes);
+        RateLimiter::hitReactionAttempt($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes);
 
         if ($cooldownSeconds > 0) {
             $cooldownStmt = $pdo->prepare('SELECT reaction_emoji, updated_at FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ? AND user_id = ? LIMIT 1');
@@ -589,5 +605,27 @@ class MessageController
             return null;
         }
         return $row;
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
+    }
+
+    private static function enforceArrayLimit(array $config, string $key, array $items): void
+    {
+        $max = (int)($config['rate_limits']['max_array_items'][$key] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (count($items) > $max) {
+            Response::json(['ok' => false, 'error' => 'تعداد آیتم‌های درخواست بیش از حد مجاز است.'], 422);
+        }
     }
 }

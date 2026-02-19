@@ -8,7 +8,9 @@ use App\Core\MessageAttachmentService;
 use App\Core\MessageMediaService;
 use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
+use App\Core\MediaLifecycleService;
 use App\Core\Request;
+use App\Core\RateLimiter;
 use App\Core\Response;
 use App\Core\Validator;
 use App\Core\Logger;
@@ -458,6 +460,12 @@ class GroupController
     public static function sendMessage(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
+        self::enforceBodyLimit($config, 'send');
+        if (RateLimiter::endpointIsLimited($config, 'send', (int)$user['id'])) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, 'send', (int)$user['id']);
+
         LastSeenService::touch($config, (int)$user['id']);
         if ($groupId <= 0) {
             Response::json(['ok' => false, 'error' => 'گروه نامعتبر است.'], 422);
@@ -467,6 +475,7 @@ class GroupController
         $body = trim($data['body'] ?? '');
         $clientId = trim((string)($data['client_id'] ?? ''));
         $mediaIds = MessageMediaService::normalizeMediaIds($data['media_ids'] ?? [], isset($data['media_id']) ? (int)$data['media_id'] : null);
+        self::enforceArrayLimit($config, 'send_media_ids', $mediaIds);
         $replyTo = isset($data['reply_to_message_id']) ? (int)$data['reply_to_message_id'] : null;
 
         $allowedTypes = ['text', 'voice', 'file', 'photo', 'video', 'media'];
@@ -571,6 +580,7 @@ class GroupController
                     $attInsert->execute([$messageId, $mid, $sort, $now]);
                     $sort++;
                 }
+                MediaLifecycleService::markAttached($config, $mediaIds);
             }
 
             $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET updated_at = ? WHERE id = ?');
@@ -618,6 +628,28 @@ class GroupController
             return null;
         }
         return self::fetchGroupByHandle($pdo, $config, $handle);
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
+    }
+
+    private static function enforceArrayLimit(array $config, string $key, array $items): void
+    {
+        $max = (int)($config['rate_limits']['max_array_items'][$key] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (count($items) > $max) {
+            Response::json(['ok' => false, 'error' => 'تعداد آیتم‌های درخواست بیش از حد مجاز است.'], 422);
+        }
     }
 
     private static function getMembership($pdo, array $config, int $groupId, int $userId): ?array
