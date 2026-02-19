@@ -19,6 +19,8 @@ class GroupController
 {
     private const TITLE_MIN = 2;
     private const TITLE_MAX = 80;
+    private const INVITE_TOKEN_TTL_SECONDS = 900;
+    private static $inviteTokenTableEnsured = false;
 
     public static function create(array $config): void
     {
@@ -62,32 +64,43 @@ class GroupController
         $allowFiles = isset($data['allow_files']) ? (int)!!$data['allow_files'] : 1;
 
         $token = null;
-        if ($privacy === 'private') {
-            $token = self::generateInviteToken($pdo, $config);
+
+        try {
+            $pdo->beginTransaction();
+            $now = date('Y-m-d H:i:s');
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'groups (owner_user_id, title, description, avatar_path, privacy_type, public_handle, private_invite_token, allow_member_invites, allow_photos, allow_videos, allow_voice, allow_files, created_at, updated_at)
+                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $insert->execute([
+                $user['id'],
+                $title,
+                $description !== '' ? $description : null,
+                $privacy,
+                $publicHandle !== '' ? $publicHandle : null,
+                $token,
+                $allowInvites,
+                $allowPhotos,
+                $allowVideos,
+                $allowVoice,
+                $allowFiles,
+                $now,
+                $now,
+            ]);
+            $groupId = (int)$pdo->lastInsertId();
+
+            $member = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'group_members (group_id, user_id, role, status, joined_at, removed_at) VALUES (?, ?, ?, ?, ?, NULL)');
+            $member->execute([$groupId, $user['id'], 'owner', 'active', $now]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Logger::error('group_create_failed', [
+                'user_id' => (int)$user['id'],
+                'privacy' => $privacy,
+                'error' => $e->getMessage(),
+            ], 'group');
+            Response::json(['ok' => false, 'error' => 'ایجاد گروه ممکن نیست.'], 500);
         }
-
-        $now = date('Y-m-d H:i:s');
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'groups (owner_user_id, title, description, avatar_path, privacy_type, public_handle, private_invite_token, allow_member_invites, allow_photos, allow_videos, allow_voice, allow_files, created_at, updated_at)
-            VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $insert->execute([
-            $user['id'],
-            $title,
-            $description !== '' ? $description : null,
-            $privacy,
-            $publicHandle !== '' ? $publicHandle : null,
-            $token,
-            $allowInvites,
-            $allowPhotos,
-            $allowVideos,
-            $allowVoice,
-            $allowFiles,
-            $now,
-            $now,
-        ]);
-        $groupId = (int)$pdo->lastInsertId();
-
-        $member = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'group_members (group_id, user_id, role, status, joined_at, removed_at) VALUES (?, ?, ?, ?, ?, NULL)');
-        $member->execute([$groupId, $user['id'], 'owner', 'active', $now]);
 
         Logger::info('group_created', [
             'group_id' => $groupId,
@@ -121,7 +134,7 @@ class GroupController
         $canInvite = $isMember && ($isOwner || ((int)$group['allow_member_invites'] === 1));
         $inviteToken = null;
         if ($group['privacy_type'] === 'private' && $canInvite) {
-            $inviteToken = $group['private_invite_token'];
+            $inviteToken = self::issuePrivateInviteToken($pdo, $config, (int)$group['id'], (int)$user['id']);
         }
 
         $members = [];
@@ -247,7 +260,11 @@ class GroupController
         $data = Request::json();
         if ($group['privacy_type'] === 'private') {
             $token = trim((string)($data['token'] ?? ''));
-            if ($token === '' || $token !== (string)$group['private_invite_token']) {
+            if ($token === '') {
+                Response::json(['ok' => false, 'error' => 'لینک دعوت نامعتبر است.'], 403);
+            }
+            $tokenGroup = self::consumePrivateInviteToken($pdo, $config, $token, (int)$user['id'], (int)$group['id']);
+            if (!$tokenGroup) {
                 Response::json(['ok' => false, 'error' => 'لینک دعوت نامعتبر است.'], 403);
             }
         }
@@ -270,10 +287,8 @@ class GroupController
         }
 
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT * FROM ' . $config['db']['prefix'] . 'groups WHERE private_invite_token = ? LIMIT 1');
-        $stmt->execute([$token]);
-        $group = $stmt->fetch();
-        if (!$group || $group['privacy_type'] !== 'private') {
+        $group = self::consumePrivateInviteToken($pdo, $config, $token, (int)$user['id']);
+        if (!$group) {
             Response::json(['ok' => false, 'error' => 'لینک دعوت نامعتبر است.'], 404);
         }
 
@@ -690,16 +705,119 @@ class GroupController
         $insert->execute([$groupId, $userId, 'member', 'active', $now]);
     }
 
-    private static function generateInviteToken($pdo, array $config): string
+    private static function issuePrivateInviteToken($pdo, array $config, int $groupId, int $issuedByUserId): string
     {
-        for ($i = 0; $i < 5; $i++) {
-            $token = bin2hex(random_bytes(16));
-            $stmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'groups WHERE private_invite_token = ? LIMIT 1');
-            $stmt->execute([$token]);
-            if (!$stmt->fetch()) {
-                return $token;
-            }
+        self::ensureInviteTokenTable($pdo, $config);
+        self::cleanupExpiredInviteTokens($pdo, $config);
+        $rawToken = bin2hex(random_bytes(24));
+        $tokenHash = hash('sha256', $rawToken);
+        $ttl = (int)($config['groups']['invite_token_ttl_seconds'] ?? self::INVITE_TOKEN_TTL_SECONDS);
+        if ($ttl <= 0) {
+            $ttl = self::INVITE_TOKEN_TTL_SECONDS;
         }
-        return bin2hex(random_bytes(16));
+        $expiresAt = date('Y-m-d H:i:s', time() + $ttl);
+        $table = $config['db']['prefix'] . 'group_invite_tokens';
+        $insert = $pdo->prepare('INSERT INTO ' . $table . ' (group_id, token_hash, issued_by_user_id, expires_at, used_at, used_by_user_id, created_at) VALUES (?, ?, ?, ?, NULL, NULL, NOW())');
+        $insert->execute([$groupId, $tokenHash, $issuedByUserId, $expiresAt]);
+        return $rawToken;
+    }
+
+    private static function consumePrivateInviteToken($pdo, array $config, string $token, int $userId, int $expectedGroupId = 0): ?array
+    {
+        self::ensureInviteTokenTable($pdo, $config);
+        $table = $config['db']['prefix'] . 'group_invite_tokens';
+        $tokenHash = hash('sha256', $token);
+
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('SELECT id, group_id FROM ' . $table . ' WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW() LIMIT 1 FOR UPDATE');
+            $stmt->execute([$tokenHash]);
+            $tokenRow = $stmt->fetch();
+            if (!$tokenRow) {
+                $retrySql = 'SELECT group_id FROM ' . $table . ' WHERE token_hash = ? AND used_by_user_id = ?';
+                $retryParams = [$tokenHash, $userId];
+                if ($expectedGroupId > 0) {
+                    $retrySql .= ' AND group_id = ?';
+                    $retryParams[] = $expectedGroupId;
+                }
+                $retrySql .= ' LIMIT 1';
+                $retryStmt = $pdo->prepare($retrySql);
+                $retryStmt->execute($retryParams);
+                $retryRow = $retryStmt->fetch();
+                if ($retryRow) {
+                    $groupStmt = $pdo->prepare('SELECT * FROM ' . $config['db']['prefix'] . 'groups WHERE id = ? AND privacy_type = ? LIMIT 1');
+                    $groupStmt->execute([(int)$retryRow['group_id'], 'private']);
+                    $group = $groupStmt->fetch();
+                    $pdo->rollBack();
+                    return $group ?: null;
+                }
+                $pdo->rollBack();
+                return null;
+            }
+            if ($expectedGroupId > 0 && (int)$tokenRow['group_id'] !== $expectedGroupId) {
+                $pdo->rollBack();
+                return null;
+            }
+
+            $groupStmt = $pdo->prepare('SELECT * FROM ' . $config['db']['prefix'] . 'groups WHERE id = ? AND privacy_type = ? LIMIT 1');
+            $groupStmt->execute([(int)$tokenRow['group_id'], 'private']);
+            $group = $groupStmt->fetch();
+            if (!$group) {
+                $pdo->rollBack();
+                return null;
+            }
+
+            $use = $pdo->prepare('UPDATE ' . $table . ' SET used_at = NOW(), used_by_user_id = ? WHERE id = ? AND used_at IS NULL');
+            $use->execute([$userId, (int)$tokenRow['id']]);
+            if ((int)$use->rowCount() !== 1) {
+                $pdo->rollBack();
+                return null;
+            }
+
+            $pdo->commit();
+            return $group;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return null;
+        }
+    }
+
+    private static function ensureInviteTokenTable($pdo, array $config): void
+    {
+        if (self::$inviteTokenTableEnsured) {
+            return;
+        }
+        $table = $config['db']['prefix'] . 'group_invite_tokens';
+        $groupsTable = $config['db']['prefix'] . 'groups';
+        $usersTable = $config['db']['prefix'] . 'users';
+        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $table . '` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `group_id` BIGINT UNSIGNED NOT NULL,
+            `token_hash` CHAR(64) NOT NULL,
+            `issued_by_user_id` INT UNSIGNED NOT NULL,
+            `expires_at` DATETIME NOT NULL,
+            `used_at` DATETIME NULL,
+            `used_by_user_id` INT UNSIGNED NULL,
+            `created_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_token_hash` (`token_hash`),
+            KEY `idx_group_active` (`group_id`, `used_at`, `expires_at`),
+            KEY `idx_expires_at` (`expires_at`),
+            CONSTRAINT `fk_group_invite_tokens_group` FOREIGN KEY (`group_id`) REFERENCES `' . $groupsTable . '` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_group_invite_tokens_issuer` FOREIGN KEY (`issued_by_user_id`) REFERENCES `' . $usersTable . '` (`id`) ON DELETE CASCADE,
+            CONSTRAINT `fk_group_invite_tokens_used_by` FOREIGN KEY (`used_by_user_id`) REFERENCES `' . $usersTable . '` (`id`) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        self::$inviteTokenTableEnsured = true;
+    }
+
+    private static function cleanupExpiredInviteTokens($pdo, array $config): void
+    {
+        if (mt_rand(1, 30) !== 1) {
+            return;
+        }
+        $table = $config['db']['prefix'] . 'group_invite_tokens';
+        $pdo->exec('DELETE FROM `' . $table . '` WHERE expires_at < NOW() OR used_at IS NOT NULL LIMIT 300');
     }
 }

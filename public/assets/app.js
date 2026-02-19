@@ -215,6 +215,8 @@
   const API = {
     login: '/api/login',
     register: '/api/register',
+    logout: '/api/logout',
+    tokenRefresh: '/api/token/refresh',
     me: '/api/me',
     meSettings: '/api/me/settings',
     usersSearch: '/api/users/search',
@@ -993,7 +995,12 @@
     userSearch?.focus();
   });
 
-  menuLogoutBtn?.addEventListener('click', () => {
+  menuLogoutBtn?.addEventListener('click', async () => {
+    try {
+      await apiFetch(API.logout, { method: 'POST' });
+    } catch (err) {
+      // Ignore logout transport failures; local state is still cleared.
+    }
     state.token = null;
     location.reload();
   });
@@ -2075,7 +2082,7 @@
     groupInfoHandle.textContent = group.public_handle ? '@' + group.public_handle : 'خصوصی';
     if (group.privacy_type === 'private' && state.currentGroup.invite_token && canInvite) {
       groupInviteRow.classList.remove('hidden');
-      groupInviteLink.value = appUrl() + '/?invite=' + state.currentGroup.invite_token;
+      groupInviteLink.value = appUrl() + '/#invite=' + encodeURIComponent(state.currentGroup.invite_token);
     } else {
       groupInviteRow.classList.add('hidden');
       groupInviteLink.value = '';
@@ -2581,8 +2588,9 @@
   }
 
   async function handleInviteLink() {
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get('invite');
+    const hash = (window.location.hash || '').replace(/^#/, '');
+    const hashParams = new URLSearchParams(hash);
+    const token = hashParams.get('invite');
     if (!token || !state.token) return;
     const res = await apiFetch(API.groupJoinByLink, { method: 'POST', body: { token } });
     if (res.data.ok) {
@@ -2592,8 +2600,9 @@
         await selectConversation(conv);
       }
     }
-    params.delete('invite');
-    const newUrl = params.toString() ? `${window.location.pathname}?${params.toString()}` : window.location.pathname;
+    hashParams.delete('invite');
+    const hashText = hashParams.toString();
+    const newUrl = hashText ? `${window.location.pathname}#${hashText}` : window.location.pathname;
     window.history.replaceState({}, '', newUrl);
   }
 
@@ -4049,8 +4058,18 @@
 
   async function initialize() {
     if (!state.token) {
-      showAuth();
-      return;
+      try {
+        const refreshRes = await apiFetch(API.tokenRefresh, { method: 'POST' });
+        if (refreshRes.data && refreshRes.data.ok && refreshRes.data.data && refreshRes.data.data.token) {
+          state.token = refreshRes.data.data.token;
+        } else {
+          showAuth();
+          return;
+        }
+      } catch (err) {
+        showAuth();
+        return;
+      }
     }
     try {
       const meRes = await apiFetch(API.me);

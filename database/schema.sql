@@ -217,6 +217,52 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}message_deletions` (
   CONSTRAINT `fk_del_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}revoked_tokens` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `jti` VARCHAR(64) NULL,
+  `token_hash` CHAR(64) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `revoked_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_jti` (`jti`),
+  UNIQUE KEY `uniq_token_hash` (`token_hash`),
+  KEY `idx_expires_at` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}refresh_tokens` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `user_id` INT UNSIGNED NOT NULL,
+  `token_hash` CHAR(64) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `created_at` DATETIME NOT NULL,
+  `revoked_at` DATETIME NULL,
+  `rotated_from_id` BIGINT UNSIGNED NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_token_hash` (`token_hash`),
+  KEY `idx_user_active` (`user_id`, `revoked_at`, `expires_at`),
+  KEY `idx_expires_at` (`expires_at`),
+  CONSTRAINT `fk_refresh_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS `{{prefix}}group_invite_tokens` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `group_id` BIGINT UNSIGNED NOT NULL,
+  `token_hash` CHAR(64) NOT NULL,
+  `issued_by_user_id` INT UNSIGNED NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `used_at` DATETIME NULL,
+  `used_by_user_id` INT UNSIGNED NULL,
+  `created_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_token_hash` (`token_hash`),
+  KEY `idx_group_active` (`group_id`, `used_at`, `expires_at`),
+  KEY `idx_expires_at` (`expires_at`),
+  CONSTRAINT `fk_group_invite_tokens_group` FOREIGN KEY (`group_id`) REFERENCES `{{prefix}}groups` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_group_invite_tokens_issuer` FOREIGN KEY (`issued_by_user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_group_invite_tokens_used_by` FOREIGN KEY (`used_by_user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}login_attempts` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
   `ip` VARCHAR(45) NOT NULL,
