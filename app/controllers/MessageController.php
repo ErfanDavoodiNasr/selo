@@ -13,6 +13,7 @@ use App\Core\Response;
 use App\Core\RateLimiter;
 use App\Core\Validator;
 use App\Core\Logger;
+use App\Core\LogContext;
 
 class MessageController
 {
@@ -206,24 +207,33 @@ class MessageController
         $now = date('Y-m-d H:i:s');
         $bodyValue = ($hasMedia || $body !== '') ? $body : null;
         $attachmentsCount = $hasMedia ? count($mediaIds) : 0;
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-        $insert->execute([$conversationId, $user['id'], $recipientId, $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
-        $messageId = (int)$pdo->lastInsertId();
+        try {
+            $pdo->beginTransaction();
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $insert->execute([$conversationId, $user['id'], $recipientId, $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
+            $messageId = (int)$pdo->lastInsertId();
 
-        if ($hasMedia) {
-            $attInsert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_attachments (message_id, media_id, sort_order, created_at) VALUES (?, ?, ?, ?)');
-            $sort = 0;
-            foreach ($mediaIds as $mid) {
-                $attInsert->execute([$messageId, $mid, $sort, $now]);
-                $sort++;
+            if ($hasMedia) {
+                $attInsert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_attachments (message_id, media_id, sort_order, created_at) VALUES (?, ?, ?, ?)');
+                $sort = 0;
+                foreach ($mediaIds as $mid) {
+                    $attInsert->execute([$messageId, $mid, $sort, $now]);
+                    $sort++;
+                }
             }
+
+            $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
+            $update->execute([$messageId, $now, $conversationId]);
+
+            $receiptInsert = $pdo->prepare('INSERT IGNORE INTO ' . $config['db']['prefix'] . 'message_receipts (message_id, user_id, status, created_at) VALUES (?, ?, ?, ?)');
+            $receiptInsert->execute([$messageId, (int)$recipientId, 'delivered', $now]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Response::json(['ok' => false, 'error' => 'ارسال پیام ناموفق بود.'], 500);
         }
-
-        $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
-        $update->execute([$messageId, $now, $conversationId]);
-
-        $receiptInsert = $pdo->prepare('INSERT IGNORE INTO ' . $config['db']['prefix'] . 'message_receipts (message_id, user_id, status, created_at) VALUES (?, ?, ?, ?)');
-        $receiptInsert->execute([$messageId, (int)$recipientId, 'delivered', $now]);
 
         Response::json(['ok' => true, 'data' => ['message_id' => $messageId]]);
     }
@@ -419,7 +429,8 @@ class MessageController
         }
         $allowed = false;
         if ($row['conversation_id'] !== null) {
-            if ((int)$row['sender_id'] === (int)$user['id'] || (int)$row['recipient_id'] === (int)$user['id']) {
+            // In private chats, "delete for everyone" is only allowed for the sender.
+            if ((int)$row['sender_id'] === (int)$user['id']) {
                 $allowed = true;
             }
         } elseif ($row['group_id'] !== null) {
@@ -461,7 +472,7 @@ class MessageController
         $windowMinutes = (int)($rateCfg['window_minutes'] ?? 1);
         $lockMinutes = (int)($rateCfg['lock_minutes'] ?? 1);
 
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $ip = LogContext::getIp() ?: 'unknown';
         $identifier = 'reaction:' . $user['id'] . ':' . $messageId;
         if (RateLimiter::tooManyAttemptsCustom($ip, $identifier, $config, $maxAttempts, $windowMinutes, $lockMinutes)) {
             Response::json(['ok' => false, 'error' => 'تعداد درخواست‌ها زیاد است. کمی بعد تلاش کنید.'], 429);

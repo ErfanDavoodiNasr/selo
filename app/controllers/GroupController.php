@@ -558,21 +558,30 @@ class GroupController
         $now = date('Y-m-d H:i:s');
         $bodyValue = ($hasMedia || $body !== '') ? $body : null;
         $attachmentsCount = $hasMedia ? count($mediaIds) : 0;
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, group_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)');
-        $insert->execute([$groupId, $user['id'], $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
-        $messageId = (int)$pdo->lastInsertId();
+        try {
+            $pdo->beginTransaction();
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, group_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)');
+            $insert->execute([$groupId, $user['id'], $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
+            $messageId = (int)$pdo->lastInsertId();
 
-        if ($hasMedia) {
-            $attInsert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_attachments (message_id, media_id, sort_order, created_at) VALUES (?, ?, ?, ?)');
-            $sort = 0;
-            foreach ($mediaIds as $mid) {
-                $attInsert->execute([$messageId, $mid, $sort, $now]);
-                $sort++;
+            if ($hasMedia) {
+                $attInsert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'message_attachments (message_id, media_id, sort_order, created_at) VALUES (?, ?, ?, ?)');
+                $sort = 0;
+                foreach ($mediaIds as $mid) {
+                    $attInsert->execute([$messageId, $mid, $sort, $now]);
+                    $sort++;
+                }
             }
-        }
 
-        $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET updated_at = ? WHERE id = ?');
-        $update->execute([$now, $groupId]);
+            $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET updated_at = ? WHERE id = ?');
+            $update->execute([$now, $groupId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Response::json(['ok' => false, 'error' => 'ارسال پیام ناموفق بود.'], 500);
+        }
 
         Response::json(['ok' => true, 'data' => ['message_id' => $messageId]]);
     }
