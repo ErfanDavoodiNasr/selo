@@ -42,6 +42,11 @@ class StreamController
         $retryMs = (int)($config['realtime']['sse_retry_ms'] ?? 2000);
         $heartbeat = (int)($config['realtime']['sse_heartbeat_seconds'] ?? 20);
         $maxSeconds = (int)($config['realtime']['sse_max_seconds'] ?? 55);
+        $pollActiveMs = max(100, min(1000, (int)($config['realtime']['sse_poll_active_ms'] ?? 300)));
+        $pollMinMs = max($pollActiveMs, min(5000, (int)($config['realtime']['sse_poll_min_ms'] ?? 1000)));
+        $pollMaxMs = max($pollMinMs, min(15000, (int)($config['realtime']['sse_poll_max_ms'] ?? 5000)));
+        $pollJitterMs = max(0, min(1000, (int)($config['realtime']['sse_poll_jitter_ms'] ?? 150)));
+        $receiptPollMs = max($pollActiveMs, min(10000, (int)($config['realtime']['sse_receipt_poll_ms'] ?? 2000)));
         $pingInterval = (int)($config['presence']['ping_interval_seconds'] ?? 15);
         $pingInterval = max(5, min(300, $pingInterval));
 
@@ -52,44 +57,79 @@ class StreamController
             'last_receipt_id' => $lastReceiptId,
         ]);
 
-        $start = time();
-        $lastPing = 0;
-        $lastPresence = 0;
+        $startAt = microtime(true);
+        $lastPingAt = 0.0;
+        $lastPresenceAt = 0.0;
+        $nextPollAt = $startAt;
+        $nextReceiptPollAt = $startAt;
+        $idleRounds = 0;
 
         while (true) {
+            $now = microtime(true);
             if (connection_aborted()) {
                 break;
             }
-            if ((time() - $lastPresence) >= $pingInterval) {
+            if (($now - $lastPresenceAt) >= $pingInterval) {
                 PresenceService::ping($config, (int)$user['id']);
-                $lastPresence = time();
-            }
-            $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId);
-
-            if (!empty($events['messages'])) {
-                foreach ($events['messages'] as $msg) {
-                    $lastMessageId = max($lastMessageId, (int)$msg['id']);
-                    self::emitEvent('message', 'm-' . $msg['id'], $msg);
-                }
-            }
-            if (!empty($events['receipts'])) {
-                foreach ($events['receipts'] as $receipt) {
-                    $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
-                    self::emitEvent('receipt', 'r-' . $receipt['id'], $receipt);
-                }
+                $lastPresenceAt = $now;
             }
 
-            if (empty($events['messages']) && empty($events['receipts'])) {
-                if ((time() - $lastPing) >= $heartbeat) {
-                    echo ": ping\n\n";
-                    $lastPing = time();
-                }
-                usleep(200000);
+            if (($now - $lastPingAt) >= $heartbeat) {
+                echo ": ping\n\n";
+                @ob_flush();
+                @flush();
+                $lastPingAt = $now;
             }
 
-            if ((time() - $start) >= $maxSeconds) {
+            if ($now >= $nextPollAt) {
+                $includeReceipts = $now >= $nextReceiptPollAt;
+                $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId, $includeReceipts);
+
+                if (!empty($events['messages'])) {
+                    foreach ($events['messages'] as $msg) {
+                        $lastMessageId = max($lastMessageId, (int)$msg['id']);
+                        self::emitEvent('message', 'm-' . $msg['id'], $msg);
+                    }
+                }
+                if (!empty($events['receipts'])) {
+                    foreach ($events['receipts'] as $receipt) {
+                        $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
+                        self::emitEvent('receipt', 'r-' . $receipt['id'], $receipt);
+                    }
+                }
+
+                if ($includeReceipts) {
+                    $nextReceiptPollAt = $now + ($receiptPollMs / 1000);
+                }
+
+                $hasEvents = !empty($events['messages']) || !empty($events['receipts']);
+                if ($hasEvents) {
+                    $idleRounds = 0;
+                    $nextDelayMs = $pollActiveMs;
+                } else {
+                    $idleRounds = min(6, $idleRounds + 1);
+                    $nextDelayMs = min($pollMaxMs, $pollMinMs * (1 << ($idleRounds - 1)));
+                }
+
+                if ($pollJitterMs > 0) {
+                    $nextDelayMs += random_int(0, $pollJitterMs);
+                }
+                $nextPollAt = $now + ($nextDelayMs / 1000);
+            }
+
+            if (($now - $startAt) >= $maxSeconds) {
                 break;
             }
+
+            $now = microtime(true);
+            $deadlineAt = $startAt + $maxSeconds;
+            if ($now >= $deadlineAt) {
+                break;
+            }
+            $nextHeartbeatAt = $lastPingAt + $heartbeat;
+            $wakeAt = min($nextPollAt, $nextHeartbeatAt, $deadlineAt);
+            $sleepSeconds = max(0.05, min(1.0, $wakeAt - $now));
+            usleep((int)($sleepSeconds * 1000000));
         }
         exit;
     }
@@ -119,7 +159,7 @@ class StreamController
         $start = time();
         $events = ['messages' => [], 'receipts' => []];
         do {
-            $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId);
+            $events = self::collectEvents($config, (int)$user['id'], $lastMessageId, $lastReceiptId, true);
             if (!empty($events['messages']) || !empty($events['receipts'])) {
                 break;
             }
@@ -195,10 +235,10 @@ class StreamController
         @flush();
     }
 
-    private static function collectEvents(array $config, int $userId, int $lastMessageId, int $lastReceiptId): array
+    private static function collectEvents(array $config, int $userId, int $lastMessageId, int $lastReceiptId, bool $includeReceipts = true): array
     {
         $messages = self::fetchMessages($config, $userId, $lastMessageId);
-        $receipts = self::fetchReceipts($config, $userId, $lastReceiptId);
+        $receipts = $includeReceipts ? self::fetchReceipts($config, $userId, $lastReceiptId) : [];
         return ['messages' => $messages, 'receipts' => $receipts];
     }
 

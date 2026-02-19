@@ -37,6 +37,11 @@ return [
         'sse_retry_ms' => 2000,
         'sse_heartbeat_seconds' => 20,
         'sse_max_seconds' => 55,
+        'sse_poll_active_ms' => 300,
+        'sse_poll_min_ms' => 1000,
+        'sse_poll_max_ms' => 5000,
+        'sse_poll_jitter_ms' => 150,
+        'sse_receipt_poll_ms' => 2000,
     ],
     'presence' => [
         'online_window_seconds' => 60,
