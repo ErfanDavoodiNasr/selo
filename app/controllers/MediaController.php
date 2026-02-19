@@ -30,15 +30,24 @@ class MediaController
                     EXISTS (
                       SELECT 1
                       FROM ' . $config['db']['prefix'] . 'messages m
-                      LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
-                      LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                      JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                      WHERE m.media_id = mf.id
+                        AND m.conversation_id IS NOT NULL
+                        AND m.is_deleted_for_all = 0
+                        AND (c.user_one_id = ? OR c.user_two_id = ?)
+                        AND NOT EXISTS (
+                          SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                          WHERE md.message_id = m.id AND md.user_id = ?
+                        )
+                    )
+                    OR EXISTS (
+                      SELECT 1
+                      FROM ' . $config['db']['prefix'] . 'messages m
+                      JOIN ' . $config['db']['prefix'] . 'group_members gm
                         ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
                       WHERE m.media_id = mf.id
+                        AND m.group_id IS NOT NULL
                         AND m.is_deleted_for_all = 0
-                        AND (
-                          (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
-                          OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
-                        )
                         AND NOT EXISTS (
                           SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
                           WHERE md.message_id = m.id AND md.user_id = ?
@@ -48,15 +57,25 @@ class MediaController
                       SELECT 1
                       FROM ' . $config['db']['prefix'] . 'message_attachments ma
                       JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = ma.message_id
-                      LEFT JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
-                      LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                      JOIN ' . $config['db']['prefix'] . 'conversations c ON c.id = m.conversation_id
+                      WHERE ma.media_id = mf.id
+                        AND m.conversation_id IS NOT NULL
+                        AND m.is_deleted_for_all = 0
+                        AND (c.user_one_id = ? OR c.user_two_id = ?)
+                        AND NOT EXISTS (
+                          SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
+                          WHERE md.message_id = m.id AND md.user_id = ?
+                        )
+                    )
+                    OR EXISTS (
+                      SELECT 1
+                      FROM ' . $config['db']['prefix'] . 'message_attachments ma
+                      JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = ma.message_id
+                      JOIN ' . $config['db']['prefix'] . 'group_members gm
                         ON gm.group_id = m.group_id AND gm.user_id = ? AND gm.status = ?
                       WHERE ma.media_id = mf.id
+                        AND m.group_id IS NOT NULL
                         AND m.is_deleted_for_all = 0
-                        AND (
-                          (m.conversation_id IS NOT NULL AND (c.user_one_id = ? OR c.user_two_id = ?))
-                          OR (m.group_id IS NOT NULL AND gm.user_id IS NOT NULL)
-                        )
                         AND NOT EXISTS (
                           SELECT 1 FROM ' . $config['db']['prefix'] . 'message_deletions md
                           WHERE md.message_id = m.id AND md.user_id = ?
@@ -67,8 +86,10 @@ class MediaController
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $mediaId,
-            $user['id'], 'active', $user['id'], $user['id'], $user['id'],
-            $user['id'], 'active', $user['id'], $user['id'], $user['id'],
+            $user['id'], $user['id'], $user['id'],
+            $user['id'], 'active', $user['id'],
+            $user['id'], $user['id'], $user['id'],
+            $user['id'], 'active', $user['id'],
         ]);
         $media = $stmt->fetch();
         if (!$media) {

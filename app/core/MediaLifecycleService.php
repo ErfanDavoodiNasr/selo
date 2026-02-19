@@ -11,32 +11,35 @@ class MediaLifecycleService
     private const DEFAULT_GC_MAX_ITEMS = 25;
     private static $stateReady = null;
 
-    public static function enforceUploadQuotas(array $config, int $userId, int $incomingBytes): void
+    public static function enforceUploadQuotas(array $config, int $userId, int $incomingBytes, int $incomingFiles = 1): void
     {
         $incomingBytes = max(0, $incomingBytes);
-        if ($incomingBytes <= 0) {
+        $incomingFiles = max(0, $incomingFiles);
+        if ($incomingBytes <= 0 && $incomingFiles <= 0) {
             return;
         }
 
         $limits = self::limits($config);
         $pdo = Database::pdo();
 
-        $usedByUser = (int)self::scalar(
-            $pdo,
-            'SELECT COALESCE(SUM(size_bytes), 0) FROM ' . $config['db']['prefix'] . 'media_files WHERE user_id = ?',
-            [$userId]
-        );
-        if ($limits['user_total_quota_bytes'] > 0 && ($usedByUser + $incomingBytes) > $limits['user_total_quota_bytes']) {
-            Response::json(['ok' => false, 'error' => 'سقف فضای فایل کاربر تکمیل شده است.'], 413);
-        }
+        if ($incomingBytes > 0) {
+            $usedByUser = (int)self::scalar(
+                $pdo,
+                'SELECT COALESCE(SUM(size_bytes), 0) FROM ' . $config['db']['prefix'] . 'media_files WHERE user_id = ?',
+                [$userId]
+            );
+            if ($limits['user_total_quota_bytes'] > 0 && ($usedByUser + $incomingBytes) > $limits['user_total_quota_bytes']) {
+                Response::json(['ok' => false, 'error' => 'سقف فضای فایل کاربر تکمیل شده است.'], 413);
+            }
 
-        $usedByUserToday = (int)self::scalar(
-            $pdo,
-            'SELECT COALESCE(SUM(size_bytes), 0) FROM ' . $config['db']['prefix'] . 'media_files WHERE user_id = ? AND created_at >= CURDATE()',
-            [$userId]
-        );
-        if ($limits['user_daily_quota_bytes'] > 0 && ($usedByUserToday + $incomingBytes) > $limits['user_daily_quota_bytes']) {
-            Response::json(['ok' => false, 'error' => 'سقف آپلود روزانه کاربر تکمیل شده است.'], 413);
+            $usedByUserToday = (int)self::scalar(
+                $pdo,
+                'SELECT COALESCE(SUM(size_bytes), 0) FROM ' . $config['db']['prefix'] . 'media_files WHERE user_id = ? AND created_at >= CURDATE()',
+                [$userId]
+            );
+            if ($limits['user_daily_quota_bytes'] > 0 && ($usedByUserToday + $incomingBytes) > $limits['user_daily_quota_bytes']) {
+                Response::json(['ok' => false, 'error' => 'سقف آپلود روزانه کاربر تکمیل شده است.'], 413);
+            }
         }
 
         $appUsage = self::row(
@@ -46,10 +49,10 @@ class MediaLifecycleService
         );
         $appTotalBytes = (int)($appUsage['total_bytes'] ?? 0);
         $appTotalFiles = (int)($appUsage['total_files'] ?? 0);
-        if ($limits['app_total_quota_bytes'] > 0 && ($appTotalBytes + $incomingBytes) > $limits['app_total_quota_bytes']) {
+        if ($incomingBytes > 0 && $limits['app_total_quota_bytes'] > 0 && ($appTotalBytes + $incomingBytes) > $limits['app_total_quota_bytes']) {
             Response::json(['ok' => false, 'error' => 'ظرفیت کل فضای آپلود اپلیکیشن تکمیل شده است.'], 503);
         }
-        if ($limits['app_total_files_limit'] > 0 && ($appTotalFiles + 1) > $limits['app_total_files_limit']) {
+        if ($limits['app_total_files_limit'] > 0 && ($appTotalFiles + $incomingFiles) > $limits['app_total_files_limit']) {
             Response::json(['ok' => false, 'error' => 'تعداد فایل‌های ذخیره‌شده از سقف مجاز عبور کرده است.'], 503);
         }
     }

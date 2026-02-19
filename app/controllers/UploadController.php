@@ -68,7 +68,7 @@ class UploadController
 
         $items = [];
         $incomingBytes = self::sumIncomingBytes($files);
-        MediaLifecycleService::enforceUploadQuotas($config, (int)$user['id'], $incomingBytes);
+        MediaLifecycleService::enforceUploadQuotas($config, (int)$user['id'], $incomingBytes, count($files));
         foreach ($files as $index => $file) {
             if ($file['error'] !== UPLOAD_ERR_OK) {
                 Logger::warn('upload_failed', ['reason' => 'upload_error', 'code' => $file['error']], 'upload');

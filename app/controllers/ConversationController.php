@@ -69,16 +69,19 @@ class ConversationController
                 FROM ' . $config['db']['prefix'] . 'groups g
                 JOIN ' . $config['db']['prefix'] . 'group_members gm
                     ON gm.group_id = g.id AND gm.user_id = ? AND gm.status = ?
-                LEFT JOIN ' . $config['db']['prefix'] . 'messages m
-                    ON m.id = (
-                        SELECT MAX(m2.id)
-                        FROM ' . $config['db']['prefix'] . 'messages m2
-                        WHERE m2.group_id = g.id AND m2.is_deleted_for_all = 0
-                    )
+                LEFT JOIN (
+                    SELECT gm2.group_id, MAX(m2.id) AS last_message_id
+                    FROM ' . $config['db']['prefix'] . 'group_members gm2
+                    LEFT JOIN ' . $config['db']['prefix'] . 'messages m2
+                        ON m2.group_id = gm2.group_id AND m2.is_deleted_for_all = 0
+                    WHERE gm2.user_id = ? AND gm2.status = ?
+                    GROUP BY gm2.group_id
+                ) glast ON glast.group_id = g.id
+                LEFT JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = glast.last_message_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'users su ON su.id = m.sender_id';
         $gStmt = $pdo->prepare($groupSql);
-        $gStmt->execute([$user['id'], 'active']);
+        $gStmt->execute([$user['id'], 'active', $user['id'], 'active']);
         $groups = $gStmt->fetchAll();
         $groupItems = [];
         foreach ($groups as $group) {

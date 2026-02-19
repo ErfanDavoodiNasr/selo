@@ -25,10 +25,14 @@ class Request
             }
         }
 
-        $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', $key));
+        $rawKey = strtoupper(str_replace('-', '_', $key));
+        $serverKey = 'HTTP_' . $rawKey;
         $candidates = [
             $_SERVER[$serverKey] ?? null,
             $_SERVER['REDIRECT_' . $serverKey] ?? null,
+            $_SERVER['REDIRECT_REDIRECT_' . $serverKey] ?? null,
+            $_SERVER[$rawKey] ?? null,
+            $_SERVER['REDIRECT_' . $rawKey] ?? null,
         ];
         foreach ($candidates as $candidate) {
             if (is_string($candidate) && trim($candidate) !== '') {
