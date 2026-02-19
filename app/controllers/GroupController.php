@@ -127,7 +127,7 @@ class GroupController
         $membership = self::getMembership($pdo, $config, (int)$group['id'], (int)$user['id']);
         $isMember = $membership && $membership['status'] === 'active';
         if (!$isMember && $group['privacy_type'] === 'private') {
-            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+            Response::json(['ok' => false, 'error' => 'گروه یافت نشد.'], 404);
         }
 
         $isOwner = ((int)$group['owner_user_id'] === (int)$user['id']);
@@ -307,12 +307,12 @@ class GroupController
 
         $membership = self::getMembership($pdo, $config, $groupId, (int)$user['id']);
         if (!$membership || $membership['status'] !== 'active') {
-            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+            Response::json(['ok' => false, 'error' => 'گروه یافت نشد.'], 404);
         }
 
         $isOwner = ((int)$group['owner_user_id'] === (int)$user['id']);
         if (!$isOwner && (int)$group['allow_member_invites'] !== 1) {
-            Response::json(['ok' => false, 'error' => 'دعوت اعضا غیرفعال است.'], 403);
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
         }
 
         $data = Request::json();

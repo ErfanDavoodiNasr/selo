@@ -387,6 +387,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'file_max_size' => parseUploadMb('upload_file_max_size', $defaultUploads['file_max_size'], $errors, 'حداکثر حجم فایل'),
                 'ffmpeg_path' => '/usr/bin/ffmpeg',
                 'ffprobe_path' => '/usr/bin/ffprobe',
+                'shared_mode' => false,
+                'disable_process_execution' => false,
+                'media_process_timeout_seconds' => 4,
             ];
 
             if (empty($errors)) {
@@ -402,6 +405,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'timezone' => 'Asia/Tehran',
                         'jwt_secret' => $jwtSecret,
                         'jwt_ttl_seconds' => $jwtTtlSeconds,
+                        'enable_service_worker' => true,
                     ],
                     'db' => $db,
                     'uploads' => $uploads,
@@ -410,18 +414,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
 
                 $export = "<?php\nreturn " . var_export($config, true) . ";\n";
-                if (!is_dir($basePath . '/config')) {
-                    mkdir($basePath . '/config', 0755, true);
+                $configDir = $basePath . '/config';
+                if (!is_dir($configDir) && !mkdir($configDir, 0755, true) && !is_dir($configDir)) {
+                    installLog('config_write_failed step=4 reason=create_config_dir_failed path=' . $configDir);
+                    $errors[] = 'ایجاد پوشه config ناموفق بود. سطح دسترسی مسیر را بررسی کنید.';
+                } elseif (!is_writable($configDir)) {
+                    installLog('config_write_failed step=4 reason=config_dir_not_writable path=' . $configDir);
+                    $errors[] = 'پوشه config قابل‌نوشتن نیست. سطح دسترسی مسیر را بررسی کنید.';
+                } else {
+                    $tmpConfigFile = $configFile . '.tmp.' . str_replace('.', '', uniqid('', true));
+                    $bytesWritten = @file_put_contents($tmpConfigFile, $export, LOCK_EX);
+                    if ($bytesWritten === false || $bytesWritten !== strlen($export)) {
+                        // Rollback: remove temporary file if write is incomplete/failed.
+                        if (is_file($tmpConfigFile)) {
+                            @unlink($tmpConfigFile);
+                        }
+                        installLog('config_write_failed step=4 reason=file_put_contents_failed path=' . $configFile);
+                        $errors[] = 'نوشتن فایل تنظیمات ناموفق بود. دسترسی نوشتن فایل config/config.php را بررسی کنید.';
+                    } elseif (!@rename($tmpConfigFile, $configFile)) {
+                        // Rollback: keep existing config untouched and delete temporary file.
+                        @unlink($tmpConfigFile);
+                        installLog('config_write_failed step=4 reason=rename_failed path=' . $configFile);
+                        $errors[] = 'ذخیره نهایی تنظیمات ناموفق بود. سطح دسترسی فایل/مسیر config را بررسی کنید.';
+                    } else {
+                        $requestIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+                        if (!isValidIp($requestIp)) {
+                            $requestIp = '-';
+                        }
+                        consumeInstallerToken($requestIp);
+                        $_SESSION['install_done'] = true;
+                        header('Location: ' . installUrl('step=finish'));
+                        exit;
+                    }
                 }
-                file_put_contents($configFile, $export);
-                $requestIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-                if (!isValidIp($requestIp)) {
-                    $requestIp = '-';
-                }
-                consumeInstallerToken($requestIp);
-                $_SESSION['install_done'] = true;
-                header('Location: ' . installUrl('step=finish'));
-                exit;
             }
         }
     }

@@ -93,11 +93,7 @@ class MediaController
         ]);
         $media = $stmt->fetch();
         if (!$media) {
-            $existsStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'media_files WHERE id = ? LIMIT 1');
-            $existsStmt->execute([$mediaId]);
-            if ($existsStmt->fetch()) {
-                \App\Core\Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
-            }
+            // Uniform response to prevent media ID enumeration.
             http_response_code(404);
             exit;
         }
