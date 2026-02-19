@@ -571,6 +571,12 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         window.SELO_CONFIG = {
             baseUrl: <?php echo json_encode($config['app']['url'] ?? '', JSON_UNESCAPED_UNICODE); ?>,
             basePath: <?php echo json_encode($basePath, JSON_UNESCAPED_UNICODE); ?>,
+            app: <?php
+                $appPayload = [
+                    'enable_service_worker' => (bool)($config['app']['enable_service_worker'] ?? true),
+                ];
+                echo json_encode($appPayload, JSON_UNESCAPED_UNICODE);
+            ?>,
             realtime: <?php
                 $realtimePayload = [
                     'mode' => $realtimeMode,

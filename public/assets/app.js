@@ -264,7 +264,10 @@
   })();
 
   function registerServiceWorker() {
+    const swEnabled = window.SELO_CONFIG?.app?.enable_service_worker !== false;
+    if (!swEnabled) return;
     if (!('serviceWorker' in navigator)) return;
+    if (!window.isSecureContext) return;
     const swPath = `${basePath || ''}/sw.js`;
     const scope = basePath ? `${basePath}/` : '/';
     window.addEventListener('load', () => {

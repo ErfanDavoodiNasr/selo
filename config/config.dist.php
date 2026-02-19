@@ -8,6 +8,7 @@ return [
         'timezone' => 'Asia/Tehran',
         'jwt_secret' => 'CHANGE_ME',
         'jwt_ttl_seconds' => 604800,
+        'enable_service_worker' => true,
     ],
     'db' => [
         'host' => 'localhost',
@@ -40,6 +41,9 @@ return [
         'image_max_pixels' => 25000000,
         'ffmpeg_path' => '/usr/bin/ffmpeg',
         'ffprobe_path' => '/usr/bin/ffprobe',
+        'shared_mode' => false,
+        'disable_process_execution' => false,
+        'media_process_timeout_seconds' => 4,
     ],
     'realtime' => [
         'mode' => 'poll',

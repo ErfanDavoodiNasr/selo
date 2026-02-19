@@ -48,6 +48,9 @@ class UserController
         if (!Validator::phone($phone)) {
             Response::json(['ok' => false, 'error' => 'شماره تلفن معتبر نیست.'], 422);
         }
+        if (!Validator::gmail($email)) {
+            Response::json(['ok' => false, 'error' => 'ایمیل باید از نوع Gmail باشد.'], 422);
+        }
         $pdo = Database::pdo();
         if ($username !== $user['username']) {
             $checkUsername = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE username = ? AND id != ? LIMIT 1');

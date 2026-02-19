@@ -95,6 +95,10 @@ class AuthController
             Logger::warn('register_failed', ['reason' => 'invalid_username', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری معتبر نیست.'], 422);
         }
+        if (!Validator::gmail($email)) {
+            Logger::warn('register_failed', ['reason' => 'invalid_email_policy', 'username' => $username], 'auth');
+            Response::json(['ok' => false, 'error' => 'ایمیل باید از نوع Gmail باشد.'], 422);
+        }
         $passwordErrors = Validator::password($password);
         if (!empty($passwordErrors)) {
             Logger::warn('register_failed', ['reason' => 'weak_password', 'username' => $username], 'auth');

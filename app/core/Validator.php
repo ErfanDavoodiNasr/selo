@@ -42,7 +42,16 @@ class Validator
 
     public static function gmail(string $email): bool
     {
-        return true;
+        $email = strtolower(trim($email));
+        if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+            return false;
+        }
+        $parts = explode('@', $email);
+        if (count($parts) !== 2) {
+            return false;
+        }
+        $domain = $parts[1];
+        return $domain === 'gmail.com' || $domain === 'googlemail.com';
     }
 
     public static function password(string $password): array

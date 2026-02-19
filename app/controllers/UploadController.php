@@ -510,16 +510,13 @@ class UploadController
     private static function createVideoThumbnail(string $source, string $mediaDir, array $uploadsCfg): ?string
     {
         $ffmpeg = $uploadsCfg['ffmpeg_path'] ?? '';
-        if ($ffmpeg === '' || !is_executable($ffmpeg)) {
+        if ($ffmpeg === '' || !is_executable($ffmpeg) || !self::canRunMediaProcess($uploadsCfg)) {
             return null;
         }
         $thumbName = 'vthumb_' . bin2hex(random_bytes(8)) . '.jpg';
         $thumbPath = rtrim($mediaDir, '/') . '/' . $thumbName;
-        $cmd = escapeshellarg($ffmpeg)
-            . ' -y -i ' . escapeshellarg($source)
-            . ' -frames:v 1 -q:v 3 -vf scale=480:-1 '
-            . escapeshellarg($thumbPath) . ' 2>/dev/null';
-        @exec($cmd);
+        $timeout = self::mediaProcessTimeoutSeconds($uploadsCfg);
+        self::runMediaProcess([$ffmpeg, '-y', '-i', $source, '-frames:v', '1', '-q:v', '3', '-vf', 'scale=480:-1', $thumbPath], $timeout);
         if (!file_exists($thumbPath)) {
             return null;
         }
@@ -529,13 +526,20 @@ class UploadController
     private static function probeDuration(array $uploadsCfg, string $source): ?int
     {
         $ffprobe = $uploadsCfg['ffprobe_path'] ?? '';
-        if ($ffprobe === '' || !is_executable($ffprobe)) {
+        if ($ffprobe === '' || !is_executable($ffprobe) || !self::canRunMediaProcess($uploadsCfg)) {
             return null;
         }
-        $cmd = escapeshellarg($ffprobe)
-            . ' -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '
-            . escapeshellarg($source) . ' 2>/dev/null';
-        $output = @shell_exec($cmd);
+        $timeout = self::mediaProcessTimeoutSeconds($uploadsCfg);
+        $output = self::runMediaProcess([
+            $ffprobe,
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=noprint_wrappers=1:nokey=1',
+            $source,
+        ], $timeout);
         if ($output === null) {
             return null;
         }
@@ -548,6 +552,108 @@ class UploadController
             return null;
         }
         return $seconds;
+    }
+
+    private static function canRunMediaProcess(array $uploadsCfg): bool
+    {
+        if (!empty($uploadsCfg['shared_mode']) || !empty($uploadsCfg['disable_process_execution'])) {
+            return false;
+        }
+        if (!function_exists('proc_open') || self::isFunctionDisabled('proc_open')) {
+            return false;
+        }
+        if (!function_exists('proc_close') || self::isFunctionDisabled('proc_close')) {
+            return false;
+        }
+        if (!function_exists('proc_get_status') || self::isFunctionDisabled('proc_get_status')) {
+            return false;
+        }
+        return true;
+    }
+
+    private static function mediaProcessTimeoutSeconds(array $uploadsCfg): int
+    {
+        $timeout = (int)($uploadsCfg['media_process_timeout_seconds'] ?? 4);
+        return max(1, min(15, $timeout));
+    }
+
+    private static function runMediaProcess(array $args, int $timeoutSeconds): ?string
+    {
+        if (empty($args)) {
+            return null;
+        }
+        $command = [];
+        foreach ($args as $arg) {
+            $command[] = escapeshellarg((string)$arg);
+        }
+        $cmd = implode(' ', $command);
+        $spec = [
+            0 => ['pipe', 'r'],
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $proc = @proc_open($cmd, $spec, $pipes);
+        if (!is_resource($proc)) {
+            return null;
+        }
+        fclose($pipes[0]);
+        stream_set_blocking($pipes[1], false);
+        stream_set_blocking($pipes[2], false);
+
+        $stdout = '';
+        $stderr = '';
+        $start = microtime(true);
+        $timedOut = false;
+
+        while (true) {
+            $status = proc_get_status($proc);
+            if (!is_array($status) || !array_key_exists('running', $status)) {
+                fclose($pipes[1]);
+                fclose($pipes[2]);
+                @proc_close($proc);
+                return null;
+            }
+            $stdout .= (string)stream_get_contents($pipes[1]);
+            $stderr .= (string)stream_get_contents($pipes[2]);
+
+            if (!$status['running']) {
+                break;
+            }
+            if ((microtime(true) - $start) >= $timeoutSeconds) {
+                $timedOut = true;
+                break;
+            }
+            usleep(100000);
+        }
+
+        if ($timedOut && function_exists('proc_terminate') && !self::isFunctionDisabled('proc_terminate')) {
+            @proc_terminate($proc);
+            usleep(100000);
+        }
+
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($proc);
+
+        if ($timedOut) {
+            Logger::warn('media_process_timeout', ['timeout_seconds' => $timeoutSeconds], 'upload');
+            return null;
+        }
+        if ($exitCode !== 0) {
+            Logger::warn('media_process_failed', ['exit_code' => $exitCode, 'stderr' => trim($stderr)], 'upload');
+            return null;
+        }
+        return trim($stdout);
+    }
+
+    private static function isFunctionDisabled(string $name): bool
+    {
+        $raw = ini_get('disable_functions');
+        if (!is_string($raw) || trim($raw) === '') {
+            return false;
+        }
+        $list = array_map('trim', explode(',', strtolower($raw)));
+        return in_array(strtolower($name), $list, true);
     }
 
     private static function enforceBodyLimit(array $config): void
