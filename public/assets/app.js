@@ -2379,7 +2379,6 @@
       state.realtime.pollTimer = null;
     }
     const params = new URLSearchParams({
-      token: state.token,
       last_message_id: state.realtime.lastMessageId,
       last_receipt_id: state.realtime.lastReceiptId
     });

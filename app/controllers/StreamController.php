@@ -162,11 +162,15 @@ class StreamController
         if ($user) {
             return $user;
         }
-        $token = trim((string)Request::param('token', ''));
-        if ($token === '') {
+        $cookieToken = $_COOKIE['selo_token'] ?? null;
+        if (!is_string($cookieToken)) {
             return null;
         }
-        return Auth::userFromToken($config, $token);
+        $cookieToken = trim($cookieToken);
+        if ($cookieToken === '') {
+            return null;
+        }
+        return Auth::userFromToken($config, $cookieToken);
     }
 
     private static function applyLastEventId(string $lastEventId, int &$lastMessageId, int &$lastReceiptId): void
