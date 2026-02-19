@@ -18,7 +18,7 @@ class ConversationController
         $sql = 'SELECT c.id, c.created_at AS conv_created_at, c.last_message_at, m.body AS last_body, m.type AS last_type, m.sender_id AS last_sender_id,
                 m.attachments_count AS last_attachments_count,
                 mf.original_name AS last_file_name,
-                u.id AS other_id, u.full_name AS other_name, u.username AS other_username, u.allow_voice_calls AS other_allow_voice_calls,
+                u.id AS other_id, u.full_name AS other_name, u.username AS other_username,
                 u.last_seen_at AS other_last_seen_at, u.last_seen_privacy AS other_last_seen_privacy,
                 up.id AS other_photo
                 FROM ' . $config['db']['prefix'] . 'conversations c
@@ -44,7 +44,6 @@ class ConversationController
             $conv['id'] = (int)$conv['id'];
             $conv['other_id'] = (int)$conv['other_id'];
             $conv['other_photo'] = $conv['other_photo'] !== null ? (int)$conv['other_photo'] : null;
-            $conv['other_allow_voice_calls'] = (int)$conv['other_allow_voice_calls'] === 1;
             $conv['unread_count'] = (int)($unreadMap[$conv['id']] ?? 0);
             $isOnline = isset($onlineMap[$conv['other_id']]);
             $status = LastSeenService::statusFor(

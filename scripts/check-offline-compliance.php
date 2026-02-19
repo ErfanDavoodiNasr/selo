@@ -8,7 +8,6 @@ $scanDirs = [
     $repoRoot . '/public',
     $repoRoot . '/app',
     $repoRoot . '/config',
-    $repoRoot . '/signaling',
 ];
 
 $textExtensions = ['php', 'js', 'css', 'html', 'htm', 'json', 'txt'];

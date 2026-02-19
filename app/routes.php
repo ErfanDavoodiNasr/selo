@@ -8,7 +8,6 @@ use App\Controllers\UploadController;
 use App\Controllers\MediaController;
 use App\Controllers\ProfileController;
 use App\Controllers\GroupController;
-use App\Controllers\CallController;
 use App\Controllers\StreamController;
 
 $router = new Router();
@@ -118,17 +117,4 @@ $router->add('POST', '#^/api/profile/photo/active$#', function () use ($config) 
 $router->add('DELETE', '#^/api/profile/photo/(\\d+)$#', function ($photoId) use ($config) {
     ProfileController::deletePhoto($config, (int)$photoId);
 });
-$router->add('POST', '#^/api/calls/token$#', function () use ($config) {
-    CallController::token($config);
-});
-$router->add('GET', '#^/api/calls/history$#', function () use ($config) {
-    CallController::history($config);
-});
-$router->add('POST', '#^/api/calls/validate$#', function () use ($config) {
-    CallController::validate($config);
-});
-$router->add('POST', '#^/api/calls/event$#', function () use ($config) {
-    CallController::event($config);
-});
-
 $router->dispatch($_SERVER['REQUEST_METHOD'], $path);

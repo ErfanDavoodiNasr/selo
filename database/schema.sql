@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}users` (
   `password_hash` VARCHAR(255) NOT NULL,
   `language` VARCHAR(10) NOT NULL DEFAULT 'fa',
   `active_photo_id` BIGINT UNSIGNED NULL,
-  `allow_voice_calls` TINYINT(1) NOT NULL DEFAULT 1,
   `last_seen_at` DATETIME NULL,
   `last_seen_privacy` ENUM('everyone', 'nobody') NOT NULL DEFAULT 'everyone',
   `created_at` DATETIME NOT NULL,
@@ -176,26 +175,6 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}message_receipts` (
   KEY `idx_id_user` (`id`, `user_id`),
   CONSTRAINT `fk_receipt_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_receipt_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-CREATE TABLE IF NOT EXISTS `{{prefix}}call_logs` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `conversation_id` BIGINT UNSIGNED NOT NULL,
-  `caller_id` INT UNSIGNED NOT NULL,
-  `callee_id` INT UNSIGNED NOT NULL,
-  `started_at` DATETIME NOT NULL,
-  `answered_at` DATETIME NULL,
-  `ended_at` DATETIME NULL,
-  `end_reason` ENUM('completed', 'declined', 'missed', 'busy', 'failed', 'canceled') NULL,
-  `duration_seconds` INT UNSIGNED NULL,
-  PRIMARY KEY (`id`),
-  KEY `idx_call_conversation` (`conversation_id`),
-  KEY `idx_call_caller` (`caller_id`),
-  KEY `idx_call_callee` (`callee_id`),
-  KEY `idx_call_started` (`started_at`),
-  CONSTRAINT `fk_call_conversation` FOREIGN KEY (`conversation_id`) REFERENCES `{{prefix}}conversations` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_call_caller` FOREIGN KEY (`caller_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_call_callee` FOREIGN KEY (`callee_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `{{prefix}}message_reactions` (

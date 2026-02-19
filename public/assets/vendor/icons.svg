@@ -4,7 +4,6 @@
   <symbol id="dark_mode" viewBox="0 0 24 24"><path fill="currentColor" d="M12.74 2a9.99 9.99 0 1 0 9.26 13.89 1 1 0 0 0-1.25-1.31 8 8 0 0 1-10.3-10.3A1 1 0 0 0 9.14 3 10 10 0 0 0 12.74 2Z"/></symbol>
   <symbol id="search" viewBox="0 0 24 24"><path fill="currentColor" d="M10 2a8 8 0 1 0 4.9 14.32l4.39 4.39 1.41-1.41-4.39-4.39A8 8 0 0 0 10 2Zm0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12Z"/></symbol>
   <symbol id="arrow_forward" viewBox="0 0 24 24"><path fill="currentColor" d="m12 4 1.41 1.41L8.83 10H20v2H8.83l4.58 4.59L12 18 5 11l7-7Z"/></symbol>
-  <symbol id="call" viewBox="0 0 24 24"><path fill="currentColor" d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1-.24c1.12.37 2.33.57 3.59.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.4 21 3 13.6 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.26.2 2.47.57 3.59a1 1 0 0 1-.25 1l-2.2 2.2Z"/></symbol>
   <symbol id="tune" viewBox="0 0 24 24"><path fill="currentColor" d="M3 17v2h6v-2H3Zm0-7v2h12v-2H3Zm0-7v2h18V3H3Zm10 16v2h8v-2h-8Zm-4-7v2h12v-2H9Zm8-7v2h4V5h-4Z"/></symbol>
   <symbol id="info" viewBox="0 0 24 24"><path fill="currentColor" d="M11 9h2V7h-2v2Zm0 8h2v-6h-2v6Zm1-15a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z"/></symbol>
   <symbol id="south" viewBox="0 0 24 24"><path fill="currentColor" d="M11 5h2v11.17l3.59-3.58L18 14l-6 6-6-6 1.41-1.41L11 16.17V5Z"/></symbol>
@@ -24,6 +23,4 @@
   <symbol id="play_arrow" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7Z"/></symbol>
   <symbol id="pause" viewBox="0 0 24 24"><path fill="currentColor" d="M6 5h4v14H6V5Zm8 0h4v14h-4V5Z"/></symbol>
   <symbol id="more_vert" viewBox="0 0 24 24"><path fill="currentColor" d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z"/></symbol>
-  <symbol id="call_received" viewBox="0 0 24 24"><path fill="currentColor" d="M20 5v6h-2V8.41l-9.29 9.3-1.42-1.42 9.3-9.29H13V5h7Z"/></symbol>
-  <symbol id="call_made" viewBox="0 0 24 24"><path fill="currentColor" d="M5 19v-6h2v2.59l9.29-9.3 1.42 1.42-9.3 9.29H11V19H5Z"/></symbol>
 </svg>

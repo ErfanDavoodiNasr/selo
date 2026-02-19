@@ -29,8 +29,8 @@ return [
         'max_photos_per_request' => 10,
         'max_videos_per_request' => 10,
         'thumbnail_max_size' => 480,
-        'ffmpeg_path' => '',
-        'ffprobe_path' => '',
+        'ffmpeg_path' => '/usr/bin/ffmpeg',
+        'ffprobe_path' => '/usr/bin/ffprobe',
     ],
     'realtime' => [
         'mode' => 'auto',
@@ -55,19 +55,6 @@ return [
             'window_minutes' => 1,
             'lock_minutes' => 1,
         ],
-    ],
-    'calls' => [
-        'enabled' => false,
-        'signaling_url' => '',
-        'signaling_secret' => 'CHANGE_ME',
-        'token_ttl_seconds' => 604800,
-        'ring_timeout_seconds' => 45,
-        'rate_limit' => [
-            'max_attempts' => 30,
-            'window_minutes' => 1,
-            'lock_minutes' => 1,
-        ],
-        'ice_servers' => [],
     ],
     'logging' => [
         'level' => 'INFO',

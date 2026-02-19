@@ -14,7 +14,7 @@ class UserController
     {
         $user = Auth::requireUser($config);
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, allow_voice_calls, last_seen_privacy FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, last_seen_privacy FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
         $stmt->execute([$user['id']]);
         $fresh = $stmt->fetch();
         $photosStmt = $pdo->prepare('SELECT id, file_name, thumbnail_name, width, height, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC');
@@ -79,17 +79,6 @@ class UserController
         $updates = [];
         $values = [];
         $response = [];
-
-        if (array_key_exists('allow_voice_calls', $data)) {
-            $parsed = filter_var($data['allow_voice_calls'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-            if ($parsed === null) {
-                Response::json(['ok' => false, 'error' => 'مقدار نامعتبر است.'], 422);
-            }
-            $allowValue = $parsed ? 1 : 0;
-            $updates[] = 'allow_voice_calls = ?';
-            $values[] = $allowValue;
-            $response['allow_voice_calls'] = (bool)$allowValue;
-        }
 
         if (array_key_exists('last_seen_privacy', $data)) {
             $privacy = LastSeenService::normalizePrivacy($data['last_seen_privacy'] ?? null);

@@ -569,7 +569,6 @@ body.info-open .drawer-backdrop {
 
 /* Extra small (xs): 0-359 */
 @media (max-width: 359px) {
-  .chat-header-actions #audio-call-btn,
   .chat-header-actions #group-settings-btn {
     display: none;
   }

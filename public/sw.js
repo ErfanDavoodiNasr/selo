@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'selo-static';
-const CACHE_VERSION = '2026-02-16-1';
+const CACHE_VERSION = '2026-02-19-1';
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 
 function scopeBasePath() {
@@ -33,9 +33,7 @@ const PRECACHE_URLS = [
   withBase('/assets/css/fonts.css'),
   withBase('/assets/style.css'),
   withBase('/assets/css/app.css'),
-  withBase('/assets/css/call.css'),
   withBase('/assets/emoji-picker.js'),
-  withBase('/assets/js/call-ui.js'),
   withBase('/assets/app.js'),
   withBase('/assets/vendor/fonts/vazirmatn-arabic.woff2'),
   withBase('/assets/vendor/fonts/vazirmatn-latin.woff2'),

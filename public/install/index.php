@@ -137,18 +137,6 @@ $defaultRealtime = [
     'sse_heartbeat_seconds' => 20,
     'sse_max_seconds' => 55,
 ];
-$defaultCalls = [
-    'enabled' => false,
-    'signaling_url' => '',
-    'token_ttl_seconds' => 120,
-    'ring_timeout_seconds' => 45,
-    'rate_limit' => [
-        'max_attempts' => 6,
-        'window_minutes' => 1,
-        'lock_minutes' => 2,
-    ],
-    'ice_servers' => [],
-];
 $defaultLogging = [
     'level' => 'INFO',
     'app_file' => $basePath . '/storage/logs/app.log',
@@ -269,13 +257,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($jwtSecret === '') {
                 $jwtSecret = bin2hex(random_bytes(32));
             }
-            $signalingSecret = trim($_POST['signaling_secret'] ?? '');
-            if ($signalingSecret === '') {
-                $signalingSecret = bin2hex(random_bytes(32));
-            }
-            $callsEnabled = ($_POST['calls_enabled'] ?? '0') === '1';
-            $signalingUrlInput = trim((string)($_POST['signaling_url'] ?? ''));
-
             $uploads = [
                 'dir' => $basePath . '/storage/uploads',
                 'max_size' => parseUploadMb('upload_max_size', $defaultUploads['max_size'], $errors, 'حداکثر حجم آواتار'),
@@ -285,33 +266,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'video_max_size' => parseUploadMb('upload_video_max_size', $defaultUploads['video_max_size'], $errors, 'حداکثر حجم ویدیو'),
                 'voice_max_size' => parseUploadMb('upload_voice_max_size', $defaultUploads['voice_max_size'], $errors, 'حداکثر حجم ویس'),
                 'file_max_size' => parseUploadMb('upload_file_max_size', $defaultUploads['file_max_size'], $errors, 'حداکثر حجم فایل'),
+                'ffmpeg_path' => '/usr/bin/ffmpeg',
+                'ffprobe_path' => '/usr/bin/ffprobe',
             ];
 
             if (empty($errors)) {
                 $jwtTtlSeconds = parseDurationSeconds('jwt_ttl_value', 'jwt_ttl_unit', 60 * 60 * 24 * 7, $errors, 'مدت اعتبار توکن');
             }
-            if (empty($errors) && $callsEnabled) {
-                if ($signalingUrlInput === '') {
-                    $errors[] = 'برای فعال‌سازی تماس صوتی، آدرس سیگنالینگ الزامی است.';
-                } else {
-                    $isRelative = strpos($signalingUrlInput, '/') === 0;
-                    $isAbsolute = (bool)preg_match('#^(ws|wss|http|https)://#i', $signalingUrlInput);
-                    if (!$isRelative && !$isAbsolute) {
-                        $errors[] = 'آدرس سیگنالینگ باید یک مسیر نسبی (شروع با /) یا یک URL کامل معتبر باشد.';
-                    }
-                }
-            }
-
             if (empty($errors)) {
-                $calls = [
-                    'enabled' => $callsEnabled,
-                    'signaling_url' => $callsEnabled ? $signalingUrlInput : '',
-                    'signaling_secret' => $signalingSecret,
-                    'token_ttl_seconds' => $defaultCalls['token_ttl_seconds'],
-                    'ring_timeout_seconds' => $defaultCalls['ring_timeout_seconds'],
-                    'rate_limit' => $defaultCalls['rate_limit'],
-                    'ice_servers' => $defaultCalls['ice_servers'],
-                ];
                 $config = [
                     'installed' => true,
                     'app' => [
@@ -325,7 +287,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'db' => $db,
                     'uploads' => $uploads,
                     'realtime' => $defaultRealtime,
-                    'calls' => $calls,
                     'logging' => $defaultLogging,
                 ];
 
@@ -366,9 +327,6 @@ if ($step === 'finish') {
 $step4Defaults = [
     'app_url' => defaultAppUrl(),
     'jwt_secret' => '',
-    'calls_enabled' => '0',
-    'signaling_url' => '',
-    'signaling_secret' => '',
     'jwt_ttl_value' => '1',
     'jwt_ttl_unit' => 'week',
     'upload_max_size' => bytesToMb($defaultUploads['max_size']),
@@ -382,9 +340,6 @@ $step4Defaults = [
 $step4Values = [
     'app_url' => $_POST['app_url'] ?? $step4Defaults['app_url'],
     'jwt_secret' => $_POST['jwt_secret'] ?? $step4Defaults['jwt_secret'],
-    'calls_enabled' => $_POST['calls_enabled'] ?? $step4Defaults['calls_enabled'],
-    'signaling_url' => $_POST['signaling_url'] ?? $step4Defaults['signaling_url'],
-    'signaling_secret' => $_POST['signaling_secret'] ?? $step4Defaults['signaling_secret'],
     'jwt_ttl_value' => $_POST['jwt_ttl_value'] ?? $step4Defaults['jwt_ttl_value'],
     'jwt_ttl_unit' => $_POST['jwt_ttl_unit'] ?? $step4Defaults['jwt_ttl_unit'],
     'upload_max_size' => $_POST['upload_max_size'] ?? $step4Defaults['upload_max_size'],
@@ -515,26 +470,6 @@ $step4Values = [
                         </label>
                     </div>
                 </div>
-                <label class="checkbox-inline">
-                    <input type="checkbox" id="calls_enabled" name="calls_enabled" value="1" <?php echo $step4Values['calls_enabled'] === '1' ? 'checked' : ''; ?>>
-                    فعال‌سازی تماس صوتی (نیازمند سرویس سیگنالینگ خارجی)
-                </label>
-                <div class="hint">در هاست اشتراکی cPanel، تماس صوتی فقط با سرویس خارجی یا Managed قابل استفاده است.</div>
-                <label>آدرس سیگنالینگ تماس</label>
-                <input type="text" id="signaling_url" name="signaling_url" value="<?php echo htmlspecialchars($step4Values['signaling_url'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="/ws یا آدرس کامل سرویس سیگنالینگ">
-                <label>کلید سیگنالینگ تماس (برای سرویس سیگنالینگ)</label>
-                <div class="input-row">
-                    <div class="grow">
-                        <input type="password" id="signaling_secret" name="signaling_secret" value="<?php echo htmlspecialchars($step4Values['signaling_secret'], ENT_QUOTES, 'UTF-8'); ?>">
-                    </div>
-                    <div class="actions">
-                        <button type="button" id="generate-signaling" class="secondary">تولید کلید</button>
-                        <label class="checkbox-inline">
-                            <input type="checkbox" id="toggle-signaling">
-                            نمایش کلید
-                        </label>
-                    </div>
-                </div>
                 <label>مدت اعتبار توکن JWT</label>
                 <div class="row">
                     <div>
@@ -637,35 +572,7 @@ $step4Values = [
             });
         }
 
-        function bindCallsToggle() {
-            var callsEnabled = document.getElementById('calls_enabled');
-            var signalingUrl = document.getElementById('signaling_url');
-            var signalingSecret = document.getElementById('signaling_secret');
-            var toggleSignaling = document.getElementById('toggle-signaling');
-            var generateSignaling = document.getElementById('generate-signaling');
-            if (!callsEnabled || !signalingUrl || !signalingSecret) {
-                return;
-            }
-
-            function sync() {
-                var enabled = callsEnabled.checked;
-                signalingUrl.disabled = !enabled;
-                signalingSecret.disabled = !enabled;
-                if (toggleSignaling) {
-                    toggleSignaling.disabled = !enabled;
-                }
-                if (generateSignaling) {
-                    generateSignaling.disabled = !enabled;
-                }
-            }
-
-            callsEnabled.addEventListener('change', sync);
-            sync();
-        }
-
         bindSecretControls('jwt_secret', 'toggle-jwt', 'generate-jwt');
-        bindSecretControls('signaling_secret', 'toggle-signaling', 'generate-signaling');
-        bindCallsToggle();
     })();
 </script>
 </html>

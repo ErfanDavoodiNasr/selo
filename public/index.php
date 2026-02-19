@@ -83,29 +83,6 @@ function cspConnectSources(array $config): array
         }
     }
 
-    $callsEnabled = isset($config['calls']['enabled']) ? (bool)$config['calls']['enabled'] : false;
-    $signalingUrl = trim((string)($config['calls']['signaling_url'] ?? ''));
-    if ($callsEnabled && $signalingUrl !== '') {
-        if (strpos($signalingUrl, '/') === 0) {
-            $hostHeader = validatedHostHeader();
-            if ($hostHeader !== null) {
-                $sources[] = 'ws://' . $hostHeader;
-                $sources[] = 'wss://' . $hostHeader;
-            }
-        } else {
-            $parsed = @parse_url($signalingUrl);
-            if (is_array($parsed) && !empty($parsed['host'])) {
-                $host = formatSourceHost((string)$parsed['host']);
-                $port = isset($parsed['port']) ? ':' . (int)$parsed['port'] : '';
-                $scheme = strtolower((string)($parsed['scheme'] ?? ''));
-                if (in_array($scheme, ['ws', 'wss', 'http', 'https'], true)) {
-                    $sources[] = 'ws://' . $host . $port;
-                    $sources[] = 'wss://' . $host . $port;
-                }
-            }
-        }
-    }
-
     return array_values(array_unique($sources));
 }
 
@@ -143,11 +120,6 @@ if (empty($config['installed'])) {
 $realtimeModeRaw = strtolower(trim((string)($config['realtime']['mode'] ?? 'auto')));
 $realtimeMode = in_array($realtimeModeRaw, ['auto', 'sse', 'poll'], true) ? $realtimeModeRaw : 'auto';
 
-$callConfig = $config['calls'] ?? [];
-$callsEnabled = isset($callConfig['enabled']) ? (bool)$callConfig['enabled'] : false;
-$callsSignalingUrl = trim((string)($callConfig['signaling_url'] ?? ''));
-$callsFrontendEnabled = $callsEnabled && $callsSignalingUrl !== '';
-
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
 if ($basePath === '/') {
@@ -183,9 +155,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/fonts.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/app.css'), ENT_QUOTES, 'UTF-8'); ?>">
-    <?php if ($callsFrontendEnabled): ?>
-    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/call.css'), ENT_QUOTES, 'UTF-8'); ?>">
-    <?php endif; ?>
 </head>
 <body data-theme="light">
     <div id="app">
@@ -273,9 +242,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                         </div>
                     </div>
                     <div class="chat-header-actions">
-                        <button id="audio-call-btn" class="icon-btn audio-call-btn hidden" title="تماس صوتی" aria-label="تماس صوتی">
-                            <span class="material-symbols-rounded">call</span>
-                        </button>
                         <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه" aria-label="تنظیمات گروه">
                             <span class="material-symbols-rounded">tune</span>
                         </button>
@@ -411,10 +377,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
             <button id="menu-contacts-btn" class="menu-item">
                 <span class="material-symbols-rounded">person</span>
                 مخاطبین
-            </button>
-            <button id="menu-calls-btn" class="menu-item<?php echo $callsFrontendEnabled ? '' : ' hidden'; ?>">
-                <span class="material-symbols-rounded">call</span>
-                تماس‌ها
             </button>
             <button id="menu-night-btn" class="menu-item">
                 <span class="material-symbols-rounded">dark_mode</span>
@@ -573,13 +535,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                     <div class="section-title">حریم خصوصی</div>
                     <div class="toggle-row">
                         <div class="toggle-text">
-                            <span>اجازه تماس صوتی</span>
-                            <div class="toggle-desc">اگر خاموش باشد، هیچکس نمی‌تواند با شما تماس بگیرد.</div>
-                        </div>
-                        <input id="allow-voice-calls-toggle" type="checkbox">
-                    </div>
-                    <div class="toggle-row">
-                        <div class="toggle-text">
                             <span>آخرین بازدید</span>
                             <div class="toggle-desc">نحوه نمایش وضعیت آنلاین و آخرین بازدید شما.</div>
                         </div>
@@ -603,18 +558,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
         </div>
     </div>
 
-    <div id="calls-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="calls-modal-title" aria-hidden="true">
-        <div class="modal-card">
-            <div class="modal-header">
-                <div id="calls-modal-title" class="modal-title">تماس‌ها</div>
-                <button id="calls-modal-close" class="icon-btn" aria-label="بستن">✖</button>
-            </div>
-            <div class="modal-body">
-                <div id="calls-list" class="calls-list"></div>
-            </div>
-        </div>
-    </div>
-
     <div id="lightbox" class="lightbox hidden" role="dialog" aria-modal="true" aria-label="پیش‌نمایش تصویر" aria-hidden="true">
         <div class="lightbox-inner">
             <img id="lightbox-img" alt="preview">
@@ -623,10 +566,6 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     </div>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="false"></div>
     <div id="live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
-
-    <?php if ($callsFrontendEnabled): ?>
-    <?php include __DIR__ . '/templates/partials/call-overlay.html'; ?>
-    <?php endif; ?>
 
     <script nonce="<?php echo htmlspecialchars($cspNonce, ENT_QUOTES, 'UTF-8'); ?>">
         window.SELO_CONFIG = {
@@ -637,23 +576,10 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                     'mode' => $realtimeMode,
                 ];
                 echo json_encode($realtimePayload, JSON_UNESCAPED_UNICODE);
-            ?>,
-            calls: <?php
-                $iceServers = $callConfig['ice_servers'] ?? [];
-                $callsPayload = [
-                    'enabled' => $callsEnabled,
-                    'signalingUrl' => $callsSignalingUrl,
-                    'ringTimeoutSeconds' => (int)($callConfig['ring_timeout_seconds'] ?? 45),
-                    'iceServers' => $iceServers,
-                ];
-                echo json_encode($callsPayload, JSON_UNESCAPED_UNICODE);
             ?>
         };
     </script>
     <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/emoji-picker.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
-    <?php if ($callsFrontendEnabled): ?>
-    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/js/call-ui.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
-    <?php endif; ?>
     <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/app.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>
