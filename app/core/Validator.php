@@ -42,7 +42,7 @@ class Validator
 
     public static function gmail(string $email): bool
     {
-        return (bool) preg_match('/^[A-Z0-9._%+-]+@gmail\.com$/i', $email);
+        return true;
     }
 
     public static function password(string $password): array

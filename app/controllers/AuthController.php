@@ -9,6 +9,7 @@ use App\Core\Request;
 use App\Core\Response;
 use App\Core\Validator;
 use App\Core\Logger;
+use App\Core\LogContext;
 
 class AuthController
 {
@@ -31,10 +32,6 @@ class AuthController
         if (!Validator::username($username)) {
             Logger::warn('register_failed', ['reason' => 'invalid_username', 'username' => $username], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری معتبر نیست.'], 422);
-        }
-        if (!Validator::gmail($email)) {
-            Logger::warn('register_failed', ['reason' => 'invalid_email', 'username' => $username], 'auth');
-            Response::json(['ok' => false, 'error' => 'فقط ایمیل‌های Gmail مجاز هستند.'], 422);
         }
         $passwordErrors = Validator::password($password);
         if (!empty($passwordErrors)) {
@@ -70,7 +67,7 @@ class AuthController
         $data = Request::json();
         $identifier = strtolower(trim($data['identifier'] ?? ''));
         $password = $data['password'] ?? '';
-        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $ip = LogContext::getIp() ?: 'unknown';
 
         if ($identifier === '' || $password === '') {
             Logger::warn('login_failed', ['reason' => 'missing_credentials', 'identifier' => $identifier], 'auth');

@@ -123,6 +123,19 @@ function parseDurationSeconds(string $valueKey, string $unitKey, int $defaultSec
     return $seconds;
 }
 
+function normalizeDbPrefix(string $rawPrefix, array &$errors): string
+{
+    $prefix = trim($rawPrefix);
+    if ($prefix === '') {
+        return 'selo_';
+    }
+    if (!preg_match('/^[A-Za-z][A-Za-z0-9_]{0,31}$/', $prefix)) {
+        $errors[] = 'پیشوند جداول نامعتبر است. فقط حروف، عدد و _ مجاز است (حداکثر ۳۲ کاراکتر و شروع با حرف).';
+        return 'selo_';
+    }
+    return strtolower($prefix);
+}
+
 $defaultUploads = [
     'max_size' => 2 * 1024 * 1024,
     'media_max_size' => 20 * 1024 * 1024,
@@ -155,11 +168,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dbName = trim($_POST['db_name'] ?? '');
         $dbUser = trim($_POST['db_user'] ?? '');
         $dbPass = trim($_POST['db_pass'] ?? '');
-        $dbPrefix = trim($_POST['db_prefix'] ?? 'selo_');
+        $dbPrefix = normalizeDbPrefix((string)($_POST['db_prefix'] ?? ''), $errors);
 
         if ($dbHost === '' || $dbName === '' || $dbUser === '') {
             $errors[] = 'اطلاعات پایگاه داده ناقص است.';
-        } else {
+        } elseif (empty($errors)) {
             try {
                 $dsn = sprintf('mysql:host=%s;dbname=%s;charset=utf8mb4', $dbHost, $dbName);
                 $pdo = new PDO($dsn, $dbUser, $dbPass, [
@@ -203,9 +216,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if (!preg_match('/^[a-z0-9_]{3,32}$/', $username)) {
                 $errors[] = 'نام کاربری مدیر معتبر نیست.';
-            }
-            if (!preg_match('/^[A-Z0-9._%+-]+@gmail\.com$/i', $email)) {
-                $errors[] = 'فقط ایمیل‌های Gmail مجاز هستند.';
             }
             if (strlen($password) < 8) {
                 $errors[] = 'رمز عبور باید حداقل ۸ کاراکتر باشد.';
@@ -428,7 +438,7 @@ $step4Values = [
                 <label>رمز عبور</label>
                 <input type="password" name="db_pass">
                 <label>پیشوند جداول</label>
-                <input type="text" name="db_prefix" value="selo_">
+                <input type="text" name="db_prefix" value="<?= htmlspecialchars($_POST['db_prefix'] ?? 'selo_', ENT_QUOTES, 'UTF-8') ?>">
                 <button type="submit">ایجاد جداول و ادامه</button>
             </form>
 
