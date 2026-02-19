@@ -1,6 +1,6 @@
 (function () {
   const state = {
-    token: localStorage.getItem('selo_token'),
+    token: null,
     me: null,
     profilePhotos: [],
     conversations: [],
@@ -580,6 +580,11 @@
     state.ui.contextMessageId = messageId;
     state.ui.contextMessageEl = element;
     state.ui.contextMessageData = msg || null;
+    if (deleteForEveryoneBtn) {
+      const canDeleteForEveryone = !!(state.me && msg && Number(msg.sender_id) === Number(state.me.id));
+      deleteForEveryoneBtn.classList.toggle('hidden', !canDeleteForEveryone);
+      deleteForEveryoneBtn.disabled = !canDeleteForEveryone;
+    }
     deleteConfirmSheet.classList.remove('hidden');
     requestAnimationFrame(() => deleteConfirmSheet.classList.add('show'));
   }
@@ -982,7 +987,6 @@
   });
 
   menuLogoutBtn?.addEventListener('click', () => {
-    localStorage.removeItem('selo_token');
     state.token = null;
     location.reload();
   });
@@ -1692,7 +1696,6 @@
         return;
       }
       state.token = res.data.data.token;
-      localStorage.setItem('selo_token', state.token);
       await initialize();
     } catch (err) {
       authError.textContent = err.message;
@@ -3170,7 +3173,9 @@
 
         actions.appendChild(replyBtn);
         actions.appendChild(delMeBtn);
-        actions.appendChild(delAllBtn);
+        if (state.me && Number(msg.sender_id) === Number(state.me.id)) {
+          actions.appendChild(delAllBtn);
+        }
         message.appendChild(actions);
 
         const chips = buildReactionChips(msg.id, msg.reactions || [], msg.current_user_reaction);
@@ -4040,7 +4045,6 @@
     }, 20000);
   }
     } catch (err) {
-      localStorage.removeItem('selo_token');
       state.token = null;
       stopRealtime();
       showAuth();

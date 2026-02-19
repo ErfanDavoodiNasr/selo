@@ -6,6 +6,7 @@ use App\Core\Database;
 use App\Core\UploadPaths;
 use App\Core\Response;
 use App\Core\Logger;
+use App\Core\ImageSafety;
 
 class UploadController
 {
@@ -92,6 +93,18 @@ class UploadController
                 Logger::warn('upload_failed', ['reason' => 'invalid_mime', 'type' => $detectedType, 'mime' => $mime], 'upload');
                 Response::json(['ok' => false, 'error' => 'فرمت فایل مجاز نیست.'], 422);
             }
+            if ($detectedType === 'photo') {
+                $imgCheck = ImageSafety::validateForDecode($file['tmp_name'], $uploadsCfg);
+                if (!$imgCheck['ok']) {
+                    Logger::warn('upload_failed', ['reason' => 'unsafe_image', 'detail' => $imgCheck['error']], 'upload');
+                    Response::json(['ok' => false, 'error' => $imgCheck['error']], 422);
+                }
+                $realMime = (string)($imgCheck['mime'] ?? '');
+                if (!in_array($realMime, $allowedMimes['photo'] ?? [], true)) {
+                    Logger::warn('upload_failed', ['reason' => 'invalid_image_header_mime', 'mime' => $realMime], 'upload');
+                    Response::json(['ok' => false, 'error' => 'فرمت تصویر معتبر نیست.'], 422);
+                }
+            }
 
             $counts[$detectedType] = ($counts[$detectedType] ?? 0) + 1;
             if ($detectedType === 'photo' && $counts['photo'] > $maxPhotos) {
@@ -123,11 +136,13 @@ class UploadController
             $thumbnailName = null;
 
             if ($detectedType === 'photo') {
-                $info = @getimagesize($destination);
-                if ($info) {
-                    $width = (int)$info[0];
-                    $height = (int)$info[1];
+                $imgCheck = ImageSafety::validateForDecode($destination, $uploadsCfg);
+                if (!$imgCheck['ok']) {
+                    @unlink($destination);
+                    Response::json(['ok' => false, 'error' => $imgCheck['error']], 422);
                 }
+                $width = (int)$imgCheck['width'];
+                $height = (int)$imgCheck['height'];
                 $thumbnailName = self::createImageThumbnail($destination, $mediaDir, $uploadsCfg);
             } elseif ($detectedType === 'video') {
                 $width = self::sanitizeInt($meta['width'] ?? null, 0, 10000);
@@ -401,14 +416,16 @@ class UploadController
         if (!extension_loaded('gd')) {
             return null;
         }
+        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg);
+        if (!$imgCheck['ok']) {
+            return null;
+        }
         $maxSize = (int)($uploadsCfg['thumbnail_max_size'] ?? 480);
         $maxSize = max(64, min(1024, $maxSize));
 
-        $info = @getimagesize($source);
-        if (!$info) {
-            return null;
-        }
-        [$width, $height] = $info;
+        $width = (int)$imgCheck['width'];
+        $height = (int)$imgCheck['height'];
+        $mime = (string)$imgCheck['mime'];
         if ($width <= 0 || $height <= 0) {
             return null;
         }
@@ -418,7 +435,7 @@ class UploadController
         $targetH = (int)round($height * $scale);
 
         $image = null;
-        switch ($info['mime']) {
+        switch ($mime) {
             case 'image/jpeg':
                 $image = @imagecreatefromjpeg($source);
                 break;

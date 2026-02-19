@@ -18,16 +18,61 @@ if (!file_exists($configFile)) {
 }
 $config = require $configFile;
 
+$user = App\Core\Auth::user($config);
+if (!$user && isset($_COOKIE['selo_token']) && is_string($_COOKIE['selo_token'])) {
+    $user = App\Core\Auth::userFromToken($config, $_COOKIE['selo_token']);
+}
+if (!$user) {
+    sendPlaceholder();
+}
+
 $photoId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($photoId <= 0) {
     sendPlaceholder();
 }
 
 $pdo = App\Core\Database::pdo();
-$stmt = $pdo->prepare('SELECT file_name, thumbnail_name, mime_type FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE id = ? AND deleted_at IS NULL LIMIT 1');
+$stmt = $pdo->prepare('SELECT upp.file_name, upp.thumbnail_name, upp.mime_type, upp.user_id
+    FROM ' . $config['db']['prefix'] . 'user_profile_photos upp
+    INNER JOIN ' . $config['db']['prefix'] . 'users u ON u.id = upp.user_id AND u.active_photo_id = upp.id
+    WHERE upp.id = ? AND upp.deleted_at IS NULL
+    LIMIT 1');
 $stmt->execute([$photoId]);
 $photo = $stmt->fetch();
 if (!$photo) {
+    sendPlaceholder();
+}
+
+$ownerId = (int)$photo['user_id'];
+$viewerId = (int)$user['id'];
+$allowed = ($ownerId === $viewerId);
+if (!$allowed) {
+    $accessStmt = $pdo->prepare('SELECT 1
+        FROM ' . $config['db']['prefix'] . 'users u
+        WHERE u.id = ?
+          AND (
+            EXISTS (
+                SELECT 1 FROM ' . $config['db']['prefix'] . 'conversations c
+                WHERE (c.user_one_id = ? AND c.user_two_id = u.id)
+                   OR (c.user_two_id = ? AND c.user_one_id = u.id)
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM ' . $config['db']['prefix'] . 'group_members gm_viewer
+                INNER JOIN ' . $config['db']['prefix'] . 'group_members gm_owner
+                    ON gm_owner.group_id = gm_viewer.group_id
+                WHERE gm_viewer.user_id = ?
+                  AND gm_viewer.status = ?
+                  AND gm_owner.user_id = u.id
+                  AND gm_owner.status = ?
+            )
+          )
+        LIMIT 1');
+    $accessStmt->execute([$ownerId, $viewerId, $viewerId, $viewerId, 'active', 'active']);
+    $allowed = (bool)$accessStmt->fetchColumn();
+}
+if (!$allowed) {
+    // Return placeholder to avoid disclosing whether photo_id is valid.
     sendPlaceholder();
 }
 
@@ -50,6 +95,6 @@ if ($thumb) {
     header('Content-Type: ' . $photo['mime_type']);
 }
 header('X-Content-Type-Options: nosniff');
-header('Cache-Control: public, max-age=604800');
+header('Cache-Control: private, max-age=3600');
 header('Content-Length: ' . filesize($path));
 readfile($path);

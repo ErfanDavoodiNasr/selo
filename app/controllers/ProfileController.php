@@ -5,6 +5,7 @@ use App\Core\Auth;
 use App\Core\Database;
 use App\Core\UploadPaths;
 use App\Core\Response;
+use App\Core\ImageSafety;
 
 class ProfileController
 {
@@ -33,7 +34,16 @@ class ProfileController
         if (!isset($allowed[$mime])) {
             Response::json(['ok' => false, 'error' => 'فرمت تصویر مجاز نیست.'], 422);
         }
-        $ext = $allowed[$mime];
+        $uploadsCfg = $config['uploads'] ?? [];
+        $imgCheck = ImageSafety::validateForDecode($file['tmp_name'], $uploadsCfg);
+        if (!$imgCheck['ok']) {
+            Response::json(['ok' => false, 'error' => $imgCheck['error']], 422);
+        }
+        $realMime = (string)($imgCheck['mime'] ?? '');
+        if (!isset($allowed[$realMime])) {
+            Response::json(['ok' => false, 'error' => 'فرمت تصویر معتبر نیست.'], 422);
+        }
+        $ext = $allowed[$realMime];
         $filename = bin2hex(random_bytes(16)) . '.' . $ext;
         $uploadDir = rtrim(UploadPaths::baseDir($config), '/');
         if (!is_dir($uploadDir)) {
@@ -44,19 +54,19 @@ class ProfileController
             Response::json(['ok' => false, 'error' => 'ذخیره فایل ممکن نیست.'], 500);
         }
 
-        $width = null;
-        $height = null;
-        $info = @getimagesize($destination);
-        if ($info) {
-            $width = (int)$info[0];
-            $height = (int)$info[1];
+        $savedCheck = ImageSafety::validateForDecode($destination, $uploadsCfg);
+        if (!$savedCheck['ok']) {
+            @unlink($destination);
+            Response::json(['ok' => false, 'error' => $savedCheck['error']], 422);
         }
-        $thumbnailName = self::createThumbnail($destination, $uploadDir, $mime);
+        $width = (int)$savedCheck['width'];
+        $height = (int)$savedCheck['height'];
+        $thumbnailName = self::createThumbnail($destination, $uploadDir, $realMime, $uploadsCfg);
 
         $pdo = Database::pdo();
         $now = date('Y-m-d H:i:s');
         $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'user_profile_photos (user_id, file_name, mime_type, file_size, width, height, thumbnail_name, is_active, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)');
-        $insert->execute([$user['id'], $filename, $mime, $file['size'], $width, $height, $thumbnailName, $now]);
+        $insert->execute([$user['id'], $filename, $realMime, $file['size'], $width, $height, $thumbnailName, $now]);
         $photoId = (int)$pdo->lastInsertId();
 
         self::setActiveInternal($config, $user['id'], $photoId);
@@ -126,16 +136,17 @@ class ProfileController
         $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET active_photo_id = ? WHERE id = ?')->execute([$photoId, $userId]);
     }
 
-    private static function createThumbnail(string $source, string $uploadDir, string $mime): ?string
+    private static function createThumbnail(string $source, string $uploadDir, string $mime, array $uploadsCfg = []): ?string
     {
         if (!extension_loaded('gd')) {
             return null;
         }
-        $info = @getimagesize($source);
-        if (!$info) {
+        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg);
+        if (!$imgCheck['ok']) {
             return null;
         }
-        [$width, $height] = $info;
+        $width = (int)$imgCheck['width'];
+        $height = (int)$imgCheck['height'];
         if ($width <= 0 || $height <= 0) {
             return null;
         }

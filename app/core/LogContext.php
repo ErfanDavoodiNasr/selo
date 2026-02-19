@@ -20,12 +20,7 @@ class LogContext
         self::$method = $_SERVER['REQUEST_METHOD'] ?? null;
         $uri = $_SERVER['REQUEST_URI'] ?? '';
         self::$path = $uri !== '' ? (parse_url($uri, PHP_URL_PATH) ?: $uri) : null;
-        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? ($_SERVER['REMOTE_ADDR'] ?? '-');
-        if (strpos($ip, ',') !== false) {
-            $parts = explode(',', $ip);
-            $ip = trim($parts[0]);
-        }
-        self::$ip = $ip ?: '-';
+        self::$ip = self::resolveClientIp();
     }
 
     public static function setIsApi(bool $isApi): void
@@ -79,6 +74,52 @@ class LogContext
     public static function getIp(): ?string
     {
         return self::$ip;
+    }
+
+    private static function resolveClientIp(): string
+    {
+        $remoteAddr = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+        if (!self::isValidIp($remoteAddr)) {
+            return '-';
+        }
+
+        // Only trust forwarding headers when request came from a trusted proxy.
+        if (!self::isTrustedProxy($remoteAddr)) {
+            return $remoteAddr;
+        }
+
+        $xff = (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
+        if ($xff !== '') {
+            $parts = explode(',', $xff);
+            foreach ($parts as $part) {
+                $candidate = trim($part);
+                if (self::isValidIp($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        $xRealIp = trim((string)($_SERVER['HTTP_X_REAL_IP'] ?? ''));
+        if (self::isValidIp($xRealIp)) {
+            return $xRealIp;
+        }
+
+        return $remoteAddr;
+    }
+
+    private static function isTrustedProxy(string $ip): bool
+    {
+        $raw = trim((string)getenv('SELO_TRUSTED_PROXIES'));
+        if ($raw === '') {
+            return false;
+        }
+        $proxies = array_filter(array_map('trim', explode(',', $raw)));
+        return in_array($ip, $proxies, true);
+    }
+
+    private static function isValidIp(string $ip): bool
+    {
+        return $ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) !== false;
     }
 
     public static function markResponseLogged(): void
