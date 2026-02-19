@@ -14,6 +14,9 @@ const API_SECRET = process.env.API_SECRET || SIGNALING_SECRET;
 const CALL_RING_TIMEOUT = parseInt(process.env.CALL_RING_TIMEOUT || '45', 10);
 const CALL_RATE_MAX = parseInt(process.env.CALL_RATE_MAX || '6', 10);
 const CALL_RATE_WINDOW = parseInt(process.env.CALL_RATE_WINDOW || '60', 10);
+const WS_AUTH_TIMEOUT_MS = parseInt(process.env.WS_AUTH_TIMEOUT_MS || '8000', 10);
+const WS_MAX_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES || '65536', 10);
+const WS_MAX_UNAUTH_PER_IP = parseInt(process.env.WS_MAX_UNAUTH_PER_IP || '8', 10);
 
 if (!SIGNALING_SECRET) {
   console.error('SIGNALING_SECRET is required.');
@@ -30,10 +33,20 @@ function isWsPath(pathname) {
   return pathname === WS_PATH || pathname === `${WS_PATH}/`;
 }
 
+function clampInt(value, fallback, min, max) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+const AUTH_TIMEOUT_MS = clampInt(WS_AUTH_TIMEOUT_MS, 8000, 1000, 60000);
+const MAX_PAYLOAD_BYTES = clampInt(WS_MAX_PAYLOAD_BYTES, 65536, 1024, 1024 * 1024);
+const MAX_UNAUTH_PER_IP = clampInt(WS_MAX_UNAUTH_PER_IP, 8, 1, 1000);
+
 const clientsByUser = new Map();
 const sessions = new Map();
 const userCalls = new Map();
 const rateLimiter = new Map();
+const unauthByIp = new Map();
 
 function generateId() {
   return crypto.randomBytes(16).toString('hex');
@@ -104,6 +117,35 @@ function sendToUser(userId, payload) {
   if (!set || set.size === 0) return false;
   set.forEach((ws) => send(ws, payload));
   return true;
+}
+
+function addUnauth(ip) {
+  const key = ip || 'unknown';
+  const count = (unauthByIp.get(key) || 0) + 1;
+  unauthByIp.set(key, count);
+  return count;
+}
+
+function removeUnauth(ip) {
+  const key = ip || 'unknown';
+  const current = unauthByIp.get(key) || 0;
+  if (current <= 1) {
+    unauthByIp.delete(key);
+    return;
+  }
+  unauthByIp.set(key, current - 1);
+}
+
+function finalizeAuth(ws) {
+  if (!ws) return;
+  if (ws.authTimer) {
+    clearTimeout(ws.authTimer);
+    ws.authTimer = null;
+  }
+  if (!ws.isAuthenticated) {
+    removeUnauth(ws.clientIp);
+    ws.isAuthenticated = true;
+  }
 }
 
 function isRateLimited(userId) {
@@ -385,7 +427,10 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocket.Server({ noServer: true });
+const wss = new WebSocket.Server({
+  noServer: true,
+  maxPayload: MAX_PAYLOAD_BYTES,
+});
 
 server.on('upgrade', (req, socket, head) => {
   let pathname = '/';
@@ -410,7 +455,25 @@ wss.on('connection', (ws, req) => {
   const xfwd = req.headers['x-forwarded-for'];
   const ip = Array.isArray(xfwd) ? xfwd[0] : (xfwd || req.socket.remoteAddress || '');
   console.info('ws_connected', { ip });
+  ws.clientIp = String(ip || 'unknown');
+  ws.isAuthenticated = false;
   ws.isAlive = true;
+
+  const unauthCount = addUnauth(ws.clientIp);
+  if (unauthCount > MAX_UNAUTH_PER_IP) {
+    console.warn('ws_rejected_unauth_limit', { ip: ws.clientIp, limit: MAX_UNAUTH_PER_IP });
+    removeUnauth(ws.clientIp);
+    ws.close(1008, 'too_many_unauth_connections');
+    return;
+  }
+
+  ws.authTimer = setTimeout(() => {
+    if (ws.readyState !== WebSocket.OPEN || ws.userId) {
+      return;
+    }
+    send(ws, { type: 'join_error', code: 'AUTH_TIMEOUT' });
+    ws.close(1008, 'auth_timeout');
+  }, AUTH_TIMEOUT_MS);
 
   ws.on('pong', () => {
     ws.isAlive = true;
@@ -421,24 +484,38 @@ wss.on('connection', (ws, req) => {
     try {
       msg = JSON.parse(raw);
     } catch (err) {
+      ws.close(1003, 'invalid_json');
       return;
     }
     if (!msg || !msg.type) return;
 
     if (msg.type === 'join') {
+      if (ws.userId) {
+        ws.close(1008, 'already_joined');
+        return;
+      }
+      if (typeof msg.token !== 'string' || msg.token.length < 16 || msg.token.length > 4096) {
+        send(ws, { type: 'join_error', code: 'INVALID_TOKEN' });
+        ws.close(1008, 'invalid_token');
+        return;
+      }
       const payload = verifyToken(msg.token);
       if (!payload) {
         send(ws, { type: 'join_error' });
-        ws.close();
+        ws.close(1008, 'invalid_token');
         return;
       }
       ws.userId = payload.sub;
+      finalizeAuth(ws);
       addClient(ws.userId, ws);
       send(ws, { type: 'join_ok', user_id: ws.userId });
       return;
     }
 
-    if (!ws.userId) return;
+    if (!ws.userId) {
+      ws.close(1008, 'unauthorized');
+      return;
+    }
 
     switch (msg.type) {
       case 'call_start':
@@ -468,6 +545,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    finalizeAuth(ws);
     handleDisconnect(ws);
   });
 
