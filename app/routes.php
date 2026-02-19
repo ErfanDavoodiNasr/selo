@@ -18,6 +18,12 @@ $router->add('POST', '#^/api/register$#', function () use ($config) {
 $router->add('POST', '#^/api/login$#', function () use ($config) {
     AuthController::login($config);
 });
+$router->add('POST', '#^/api/logout$#', function () use ($config) {
+    AuthController::logout($config);
+});
+$router->add('POST', '#^/api/token/refresh$#', function () use ($config) {
+    AuthController::refresh($config);
+});
 $router->add('GET', '#^/api/me$#', function () use ($config) {
     UserController::me($config);
 });

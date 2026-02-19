@@ -8,6 +8,7 @@ use App\Core\MessageReceiptService;
 use App\Core\PresenceService;
 use App\Core\Request;
 use App\Core\Response;
+use PDOException;
 
 class ConversationController
 {
@@ -137,9 +138,22 @@ class ConversationController
             Response::json(['ok' => true, 'data' => ['conversation_id' => (int)$row['id']]]);
         }
         $now = date('Y-m-d H:i:s');
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'conversations (user_one_id, user_two_id, created_at) VALUES (?, ?, ?)');
-        $insert->execute([$userOne, $userTwo, $now]);
-        Response::json(['ok' => true, 'data' => ['conversation_id' => (int)$pdo->lastInsertId()]]);
+        try {
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'conversations (user_one_id, user_two_id, created_at) VALUES (?, ?, ?)');
+            $insert->execute([$userOne, $userTwo, $now]);
+            Response::json(['ok' => true, 'data' => ['conversation_id' => (int)$pdo->lastInsertId()]]);
+        } catch (PDOException $e) {
+            if (!self::isUniqueViolation($e)) {
+                throw $e;
+            }
+            $recover = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'conversations WHERE user_one_id = ? AND user_two_id = ? LIMIT 1');
+            $recover->execute([$userOne, $userTwo]);
+            $existing = $recover->fetch();
+            if ($existing) {
+                Response::json(['ok' => true, 'data' => ['conversation_id' => (int)$existing['id']]]);
+            }
+            throw $e;
+        }
     }
 
     private static function previewText(string $type, string $body, string $filename, int $attachmentsCount = 0): string
@@ -163,5 +177,12 @@ class ConversationController
             default:
                 return $body;
         }
+    }
+
+    private static function isUniqueViolation(PDOException $e): bool
+    {
+        $sqlState = (string)$e->getCode();
+        $driverCode = (int)($e->errorInfo[1] ?? 0);
+        return $sqlState === '23000' || $driverCode === 1062;
     }
 }

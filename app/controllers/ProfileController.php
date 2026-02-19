@@ -64,12 +64,30 @@ class ProfileController
         $thumbnailName = self::createThumbnail($destination, $uploadDir, $realMime, $uploadsCfg);
 
         $pdo = Database::pdo();
-        $now = date('Y-m-d H:i:s');
-        $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'user_profile_photos (user_id, file_name, mime_type, file_size, width, height, thumbnail_name, is_active, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)');
-        $insert->execute([$user['id'], $filename, $realMime, $file['size'], $width, $height, $thumbnailName, $now]);
-        $photoId = (int)$pdo->lastInsertId();
+        try {
+            $pdo->beginTransaction();
+            $now = date('Y-m-d H:i:s');
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'user_profile_photos (user_id, file_name, mime_type, file_size, width, height, thumbnail_name, is_active, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)');
+            $insert->execute([$user['id'], $filename, $realMime, $file['size'], $width, $height, $thumbnailName, $now]);
+            $photoId = (int)$pdo->lastInsertId();
 
-        self::setActiveInternal($config, $user['id'], $photoId);
+            self::setActiveInternal($config, $user['id'], $photoId);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (is_file($destination)) {
+                @unlink($destination);
+            }
+            if ($thumbnailName !== null) {
+                $thumbPath = rtrim($uploadDir, '/') . '/' . $thumbnailName;
+                if (is_file($thumbPath)) {
+                    @unlink($thumbPath);
+                }
+            }
+            Response::json(['ok' => false, 'error' => 'ثبت عکس پروفایل در پایگاه‌داده ممکن نیست.'], 500);
+        }
 
         Response::json(['ok' => true, 'data' => ['photo_id' => $photoId]]);
     }
@@ -141,7 +159,8 @@ class ProfileController
         if (!extension_loaded('gd')) {
             return null;
         }
-        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg);
+        $targetSize = 256;
+        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg, $targetSize * $targetSize);
         if (!$imgCheck['ok']) {
             return null;
         }
@@ -154,8 +173,6 @@ class ProfileController
         $size = min($width, $height);
         $srcX = (int)(($width - $size) / 2);
         $srcY = (int)(($height - $size) / 2);
-        $targetSize = 256;
-
         $image = null;
         switch ($mime) {
             case 'image/jpeg':

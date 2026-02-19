@@ -7,6 +7,10 @@ class Response
     {
         http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
+        if (LogContext::isApi() && !headers_sent()) {
+            header('Cache-Control: no-store, no-cache, must-revalidate');
+            header('Pragma: no-cache');
+        }
 
         $rid = LogContext::getRequestId();
         if ($rid && !headers_sent()) {

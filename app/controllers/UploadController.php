@@ -172,23 +172,43 @@ class UploadController
             }
 
             $pdo = Database::pdo();
-            $now = date('Y-m-d H:i:s');
-            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'media_files (user_id, type, file_name, original_name, mime_type, size_bytes, duration, width, height, thumbnail_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-            $insert->execute([
-                $user['id'],
-                $detectedType,
-                $filename,
-                $originalName,
-                $mime,
-                (int)$file['size'],
-                $duration,
-                $width,
-                $height,
-                $thumbnailName,
-                $now,
-            ]);
-            $mediaId = (int)$pdo->lastInsertId();
-            MediaLifecycleService::markPending($config, $mediaId);
+            $mediaId = 0;
+            try {
+                $pdo->beginTransaction();
+                $now = date('Y-m-d H:i:s');
+                $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'media_files (user_id, type, file_name, original_name, mime_type, size_bytes, duration, width, height, thumbnail_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+                $insert->execute([
+                    $user['id'],
+                    $detectedType,
+                    $filename,
+                    $originalName,
+                    $mime,
+                    (int)$file['size'],
+                    $duration,
+                    $width,
+                    $height,
+                    $thumbnailName,
+                    $now,
+                ]);
+                $mediaId = (int)$pdo->lastInsertId();
+                MediaLifecycleService::markPending($config, $mediaId);
+                $pdo->commit();
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                if (is_file($destination)) {
+                    @unlink($destination);
+                }
+                if ($thumbnailName !== null) {
+                    $thumbPath = rtrim($mediaDir, '/') . '/' . $thumbnailName;
+                    if (is_file($thumbPath)) {
+                        @unlink($thumbPath);
+                    }
+                }
+                Logger::error('upload_failed', ['reason' => 'db_persist_failed', 'error' => $e->getMessage()], 'upload');
+                Response::json(['ok' => false, 'error' => 'ثبت فایل در پایگاه‌داده ممکن نیست.'], 500);
+            }
 
             Logger::info('upload_success', [
                 'media_id' => $mediaId,
@@ -438,12 +458,12 @@ class UploadController
         if (!extension_loaded('gd')) {
             return null;
         }
-        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg);
+        $maxSize = (int)($uploadsCfg['thumbnail_max_size'] ?? 480);
+        $maxSize = max(64, min(1024, $maxSize));
+        $imgCheck = ImageSafety::validateForDecode($source, $uploadsCfg, $maxSize * $maxSize);
         if (!$imgCheck['ok']) {
             return null;
         }
-        $maxSize = (int)($uploadsCfg['thumbnail_max_size'] ?? 480);
-        $maxSize = max(64, min(1024, $maxSize));
 
         $width = (int)$imgCheck['width'];
         $height = (int)$imgCheck['height'];

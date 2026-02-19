@@ -5,25 +5,61 @@ class Auth
 {
     private static $user;
     private static $authSource = null;
+    private static $revokedTableEnsured = false;
 
     public static function issueToken(array $user, array $config): string
     {
         $header = ['alg' => 'HS256', 'typ' => 'JWT'];
-        $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? (60 * 60 * 24 * 7));
+        $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? 3600);
         if ($ttlSeconds <= 0) {
-            $ttlSeconds = 60 * 60 * 24 * 7;
+            $ttlSeconds = 3600;
         }
         $payload = [
             'iss' => $config['app']['url'] ?? 'selo',
             'sub' => $user['id'],
             'iat' => time(),
             'exp' => time() + $ttlSeconds,
+            'jti' => bin2hex(random_bytes(16)),
         ];
         $base64Header = Utils::base64UrlEncode(json_encode($header));
         $base64Payload = Utils::base64UrlEncode(json_encode($payload));
         $signature = hash_hmac('sha256', $base64Header . '.' . $base64Payload, $config['app']['jwt_secret'], true);
         $base64Signature = Utils::base64UrlEncode($signature);
         return $base64Header . '.' . $base64Payload . '.' . $base64Signature;
+    }
+
+    public static function requestToken(): ?string
+    {
+        $auth = self::resolveRequestToken();
+        return $auth['token'] ?: null;
+    }
+
+    public static function revokeToken(array $config, string $token): void
+    {
+        $payload = self::decodeToken($token, $config, false);
+        if (!$payload) {
+            return;
+        }
+        self::ensureRevokedTable($config);
+        $pdo = Database::pdo();
+        if (!$pdo) {
+            return;
+        }
+        $jti = isset($payload['jti']) ? (string)$payload['jti'] : null;
+        if ($jti === '') {
+            $jti = null;
+        }
+        $expiresAtTs = (int)($payload['exp'] ?? 0);
+        if ($expiresAtTs <= 0) {
+            $expiresAtTs = time() + 3600;
+        }
+        $expiresAt = date('Y-m-d H:i:s', $expiresAtTs);
+        $tokenHash = hash('sha256', $token);
+        $table = $config['db']['prefix'] . 'revoked_tokens';
+        $stmt = $pdo->prepare('INSERT INTO ' . $table . ' (jti, token_hash, expires_at, revoked_at) VALUES (?, ?, ?, NOW())
+            ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at), revoked_at = VALUES(revoked_at), token_hash = VALUES(token_hash)');
+        $stmt->execute([$jti, $tokenHash, $expiresAt]);
+        self::cleanupExpiredRevocations($config);
     }
 
     public static function user(array $config): ?array
@@ -44,7 +80,7 @@ class Auth
 
     public static function userFromToken(array $config, string $token): ?array
     {
-        $payload = self::decodeToken($token, $config['app']['jwt_secret']);
+        $payload = self::decodeToken($token, $config, true);
         if (!$payload) {
             return null;
         }
@@ -105,13 +141,14 @@ class Auth
         return hash_equals($cookieToken, trim($headerToken));
     }
 
-    private static function decodeToken(string $token, string $secret): ?array
+    private static function decodeToken(string $token, array $config, bool $checkRevoked = true): ?array
     {
         $parts = explode('.', $token);
         if (count($parts) !== 3) {
             return null;
         }
         [$header, $payload, $signature] = $parts;
+        $secret = (string)($config['app']['jwt_secret'] ?? '');
         $validSignature = Utils::base64UrlEncode(hash_hmac('sha256', $header . '.' . $payload, $secret, true));
         if (!hash_equals($validSignature, $signature)) {
             return null;
@@ -120,6 +157,68 @@ class Auth
         if (!$decoded || ($decoded['exp'] ?? 0) < time()) {
             return null;
         }
+        if ($checkRevoked && self::isTokenRevoked($config, $token, $decoded)) {
+            return null;
+        }
         return $decoded;
+    }
+
+    private static function isTokenRevoked(array $config, string $token, array $payload): bool
+    {
+        self::ensureRevokedTable($config);
+        $pdo = Database::pdo();
+        if (!$pdo) {
+            return false;
+        }
+        $table = $config['db']['prefix'] . 'revoked_tokens';
+        $jti = isset($payload['jti']) ? (string)$payload['jti'] : '';
+        if ($jti !== '') {
+            $byJti = $pdo->prepare('SELECT 1 FROM ' . $table . ' WHERE jti = ? AND expires_at > NOW() LIMIT 1');
+            $byJti->execute([$jti]);
+            if ($byJti->fetchColumn()) {
+                return true;
+            }
+        }
+        $tokenHash = hash('sha256', $token);
+        $byHash = $pdo->prepare('SELECT 1 FROM ' . $table . ' WHERE token_hash = ? AND expires_at > NOW() LIMIT 1');
+        $byHash->execute([$tokenHash]);
+        return (bool)$byHash->fetchColumn();
+    }
+
+    private static function ensureRevokedTable(array $config): void
+    {
+        if (self::$revokedTableEnsured) {
+            return;
+        }
+        $pdo = Database::pdo();
+        if (!$pdo) {
+            return;
+        }
+        $table = $config['db']['prefix'] . 'revoked_tokens';
+        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $table . '` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `jti` VARCHAR(64) NULL,
+            `token_hash` CHAR(64) NOT NULL,
+            `expires_at` DATETIME NOT NULL,
+            `revoked_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_jti` (`jti`),
+            UNIQUE KEY `uniq_token_hash` (`token_hash`),
+            KEY `idx_expires_at` (`expires_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        self::$revokedTableEnsured = true;
+    }
+
+    private static function cleanupExpiredRevocations(array $config): void
+    {
+        if (mt_rand(1, 50) !== 1) {
+            return;
+        }
+        $pdo = Database::pdo();
+        if (!$pdo) {
+            return;
+        }
+        $table = $config['db']['prefix'] . 'revoked_tokens';
+        $pdo->exec('DELETE FROM `' . $table . '` WHERE expires_at < NOW() LIMIT 200');
     }
 }

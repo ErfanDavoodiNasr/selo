@@ -569,8 +569,8 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
 
     <script nonce="<?php echo htmlspecialchars($cspNonce, ENT_QUOTES, 'UTF-8'); ?>">
         window.SELO_CONFIG = {
-            baseUrl: '<?php echo $config['app']['url'] ?? ''; ?>',
-            basePath: '<?php echo $basePath; ?>',
+            baseUrl: <?php echo json_encode($config['app']['url'] ?? '', JSON_UNESCAPED_UNICODE); ?>,
+            basePath: <?php echo json_encode($basePath, JSON_UNESCAPED_UNICODE); ?>,
             realtime: <?php
                 $realtimePayload = [
                     'mode' => $realtimeMode,
