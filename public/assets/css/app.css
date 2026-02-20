@@ -853,6 +853,7 @@ body {
 .messages {
   flex: 1;
   overflow-y: auto;
+  direction: ltr;
   padding: var(--tg-gap-5) var(--tg-gap-5) calc(var(--tg-gap-5) + var(--tg-composer-h) + env(safe-area-inset-bottom));
   scroll-behavior: smooth;
   overscroll-behavior: contain;
@@ -860,16 +861,22 @@ body {
 
 .message {
   max-width: 76%;
-  padding: var(--tg-gap-3) var(--tg-gap-4);
-  border-radius: var(--tg-radius-lg);
-  background: var(--tg-bubble-in);
-  box-shadow: var(--tg-shadow);
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .message.outgoing {
+  margin-left: auto;
+  margin-right: 0;
+  align-self: flex-end;
+}
+
+.message.incoming {
   margin-right: auto;
   margin-left: 0;
-  background: var(--tg-bubble-out);
+  align-self: flex-start;
 }
 
 .message .meta,

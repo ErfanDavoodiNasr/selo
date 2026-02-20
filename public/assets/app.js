@@ -6,6 +6,7 @@
     conversations: [],
     currentConversation: null,
     currentGroup: null,
+    pinnedByConversation: {},
     replyTo: null,
     loadingMessages: false,
     oldestMessageId: null,
@@ -22,6 +23,7 @@
       lastMessageId: 0,
       lastReceiptId: 0,
       connected: false,
+      hasConnectedOnce: false,
       hiddenTimer: null
     },
     pendingSends: {},
@@ -53,6 +55,11 @@
       contextMessageId: null,
       contextMessageEl: null,
       contextMessageData: null,
+      composeMode: null,
+      editingMessageId: null,
+      editingMessageData: null,
+      forwardMessageId: null,
+      forwardMessageData: null,
       activeModal: null,
       modalReturnFocus: null,
       lightboxReturnFocus: null
@@ -99,6 +106,10 @@
   const replyBar = document.getElementById('reply-bar');
   const replyPreview = document.getElementById('reply-preview');
   const replyCancel = document.getElementById('reply-cancel');
+  const replyTitle = replyBar ? replyBar.querySelector('.reply-content span') : null;
+  const pinnedBar = document.getElementById('pinned-bar');
+  const pinnedPreview = document.getElementById('pinned-preview');
+  const pinnedClear = document.getElementById('pinned-clear');
   const backToChats = document.getElementById('back-to-chats');
   const groupSettingsBtn = document.getElementById('group-settings-btn');
   const infoToggle = document.getElementById('info-toggle');
@@ -223,6 +234,7 @@
     conversations: '/api/conversations',
     unreadCount: '/api/unread-count',
     messages: '/api/messages',
+    messageEdit: '/api/messages/edit',
     messageAck: '/api/messages/ack',
     messageMarkRead: '/api/messages/mark-read',
     messageStatus: '/api/messages/status',
@@ -264,6 +276,79 @@
     const errorMaxMs = 10000;
     return { mode, sseEnabled, minDelayMs, maxDelayMs, hiddenDelayMs, jitterMs, errorBaseMs, errorMaxMs };
   })();
+  const PINNED_STORAGE_KEY = 'selo_pinned_messages_v1';
+
+  function loadPinnedState() {
+    try {
+      const raw = localStorage.getItem(PINNED_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function savePinnedState() {
+    try {
+      localStorage.setItem(PINNED_STORAGE_KEY, JSON.stringify(state.pinnedByConversation || {}));
+    } catch (err) {
+      // ignore storage errors
+    }
+  }
+
+  function previewTextForPinned(message) {
+    if (!message) return '';
+    if (message.attachments && message.attachments.length) {
+      return attachmentsLabel(message.attachments);
+    }
+    if (message.type && message.type !== 'text') {
+      return mediaLabel(message.type, message.media?.original_name || '');
+    }
+    return truncate(message.body || '', 80);
+  }
+
+  function getPinnedForCurrentConversation() {
+    if (!state.currentConversation) return null;
+    const key = conversationKey(state.currentConversation);
+    if (!key) return null;
+    return state.pinnedByConversation[key] || null;
+  }
+
+  function setPinnedForCurrentConversation(message) {
+    if (!state.currentConversation || !message || !message.id) return;
+    const key = conversationKey(state.currentConversation);
+    if (!key) return;
+    state.pinnedByConversation[key] = {
+      id: Number(message.id),
+      preview: previewTextForPinned(message),
+    };
+    savePinnedState();
+    renderPinnedBar();
+  }
+
+  function clearPinnedForCurrentConversation() {
+    if (!state.currentConversation) return;
+    const key = conversationKey(state.currentConversation);
+    if (!key) return;
+    if (state.pinnedByConversation[key]) {
+      delete state.pinnedByConversation[key];
+      savePinnedState();
+    }
+    renderPinnedBar();
+  }
+
+  function renderPinnedBar() {
+    if (!pinnedBar || !pinnedPreview) return;
+    const pinned = getPinnedForCurrentConversation();
+    if (!pinned || !pinned.id) {
+      pinnedBar.classList.add('hidden');
+      pinnedPreview.textContent = '';
+      return;
+    }
+    pinnedPreview.textContent = pinned.preview || `پیام ${pinned.id}`;
+    pinnedBar.classList.remove('hidden');
+  }
 
   function registerServiceWorker() {
     const swEnabled = window.SELO_CONFIG?.app?.enable_service_worker !== false;
@@ -389,6 +474,10 @@
       return;
     }
     if (!state.realtime.connected) {
+      if (!state.realtime.hasConnectedOnce) {
+        hideNetworkStatus();
+        return;
+      }
       showNetworkStatus('اتصال ناپایدار است. در حال تلاش برای بازیابی...', 'degraded');
       return;
     }
@@ -603,6 +692,22 @@
     requestAnimationFrame(() => deleteConfirmSheet.classList.add('show'));
   }
 
+  function isOwnMessage(msg) {
+    return !!(state.me && msg && Number(msg.sender_id) === Number(state.me.id));
+  }
+
+  function normalizeUser(rawUser) {
+    if (!rawUser || typeof rawUser !== 'object') return rawUser;
+    const user = { ...rawUser };
+    if (user.id !== undefined && user.id !== null && user.id !== '') {
+      user.id = Number(user.id);
+    }
+    if (user.active_photo_id !== undefined && user.active_photo_id !== null && user.active_photo_id !== '') {
+      user.active_photo_id = Number(user.active_photo_id);
+    }
+    return user;
+  }
+
   function getMessageMediaItems(msg) {
     const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
     const fallback = msg.media ? [msg.media] : [];
@@ -610,6 +715,10 @@
   }
 
   function buildMessageActions(msg, element) {
+    const own = isOwnMessage(msg);
+    const pinned = getPinnedForCurrentConversation();
+    const isPinned = !!(pinned && Number(pinned.id) === Number(msg.id));
+    const copySource = (msg.body || '').trim() || previewTextForPinned(msg);
     const actions = [];
     actions.push({
       id: 'reply',
@@ -620,45 +729,38 @@
       }
     });
 
-    if (msg.body && msg.type === 'text') {
+    if (copySource) {
       actions.push({
         id: 'copy',
         label: 'کپی متن',
         icon: 'content_copy',
         handler: async () => {
-          await copyMessageText(msg.body);
+          await copyMessageText(copySource);
         }
       });
     }
 
-    const mediaItems = getMessageMediaItems(msg);
-    const hasPhotoOrVideo = mediaItems.some(att => att.type === 'photo' || att.type === 'video');
-    const hasFile = mediaItems.some(att => !['photo', 'video', 'voice'].includes(att.type));
-    if (hasPhotoOrVideo) {
-      const target = mediaItems.find(att => att.type === 'photo' || att.type === 'video');
-      if (target) {
-        actions.push({
-          id: 'save',
-          label: 'ذخیره در گالری',
-          icon: 'image',
-          handler: () => {
-            window.open(makeUrl(API.mediaDownload(target.id)), '_blank');
-          }
-        });
-      }
-    }
-    if (hasFile) {
-      const target = mediaItems.find(att => !['photo', 'video', 'voice'].includes(att.type));
-      if (target) {
-        actions.push({
-          id: 'download',
-          label: 'دانلود',
-          icon: 'download',
-          handler: () => {
-            window.open(makeUrl(API.mediaDownload(target.id)), '_blank');
-          }
-        });
-      }
+    actions.push({
+      id: 'forward',
+      label: 'فوروارد',
+      icon: 'forward',
+      handler: () => setForward(msg)
+    });
+
+    actions.push({
+      id: 'pin',
+      label: isPinned ? 'برداشتن پین' : 'پین',
+      icon: isPinned ? 'keep_off' : 'keep',
+      handler: () => togglePinnedMessage(msg)
+    });
+
+    if (own && msg.type === 'text' && (msg.body || '').trim() !== '') {
+      actions.push({
+        id: 'edit',
+        label: 'ویرایش',
+        icon: 'edit',
+        handler: () => setEdit(msg)
+      });
     }
 
     actions.push({
@@ -1544,10 +1646,10 @@
       queueReceipt([msg.id], 'delivered');
       if (wasAtBottom) {
         markSeenForVisible();
-      } else if (msg.sender_id !== state.me.id && msg.conversation_id) {
+      } else if (!isOwnMessage(msg) && msg.conversation_id) {
         incrementUnread(msg.conversation_id);
       }
-    } else if (msg.sender_id !== state.me.id) {
+    } else if (!isOwnMessage(msg)) {
       queueReceipt([msg.id], 'delivered');
       if (msg.conversation_id) {
         incrementUnread(msg.conversation_id);
@@ -1573,6 +1675,7 @@
       state.realtime.pollTimer = null;
     }
     state.realtime.connected = false;
+    state.realtime.hasConnectedOnce = false;
     state.realtime.mode = null;
     updateNetworkStatus();
   }
@@ -1596,6 +1699,7 @@
 
     es.addEventListener('open', () => {
       state.realtime.connected = true;
+      state.realtime.hasConnectedOnce = true;
       state.realtime.backoffMs = 1000;
       updateNetworkStatus();
     });
@@ -1641,6 +1745,7 @@
       const etag = `m:${state.realtime.lastMessageId}-r:${state.realtime.lastReceiptId}`;
       const res = await apiFetch(API.poll + '?' + params.toString(), { headers: { 'If-None-Match': etag } });
       state.realtime.connected = true;
+      state.realtime.hasConnectedOnce = true;
       if (res.status !== 204 && res.data && res.data.ok) {
         const payload = res.data.data || {};
         const messages = payload.messages || [];
@@ -1938,7 +2043,7 @@
   async function refreshMe() {
     const res = await apiFetch(API.me);
     if (res.data.ok) {
-      state.me = res.data.data.user;
+      state.me = normalizeUser(res.data.data.user);
       state.profilePhotos = res.data.data.photos || [];
       syncUserSettingsUI();
       syncSidebarProfile();
@@ -2387,6 +2492,7 @@
       groupSettingsBtn.classList.add('hidden');
       updateHeaderStatus();
       updateInfoPanel();
+      renderPinnedBar();
       return;
     }
     if (conversation.chat_type === 'group') {
@@ -2401,6 +2507,7 @@
       groupSettingsBtn.classList.remove('hidden');
       updateHeaderStatus();
       updateInfoPanel();
+      renderPinnedBar();
       return;
     }
     const displayName = conversation.other_name || conversation.other_username || '';
@@ -2415,6 +2522,7 @@
     groupSettingsBtn.classList.add('hidden');
     updateHeaderStatus();
     updateInfoPanel();
+    renderPinnedBar();
   }
 
   function conversationKey(conversation) {
@@ -2677,7 +2785,7 @@
             showMessagesState('empty', 'هنوز پیامی در این گفتگو ثبت نشده است.');
           }
         }
-        queueReceipt(list.filter(msg => msg.sender_id !== state.me.id).map(msg => msg.id), 'delivered');
+        queueReceipt(list.filter(msg => !isOwnMessage(msg)).map(msg => msg.id), 'delivered');
         markSeenForVisible();
       }
     } catch (err) {
@@ -3109,14 +3217,15 @@
     messages.forEach(msg => {
       const localStatus = String(msg.local_status || msg.pending_status || '').trim();
       const isPendingMessage = msg.is_pending === true || localStatus !== '' || String(msg.id).startsWith('temp-');
-      if (msg.client_id && !isPendingMessage && msg.sender_id === state.me.id) {
+      const ownMessage = isOwnMessage(msg);
+      if (msg.client_id && !isPendingMessage && ownMessage) {
         reconcilePendingSend(String(msg.client_id));
       }
       if (document.getElementById(`msg-${msg.id}`)) {
         return;
       }
       const message = document.createElement('article');
-      message.className = 'message ' + (msg.sender_id === state.me.id ? 'outgoing' : 'incoming');
+      message.className = 'message ' + (ownMessage ? 'outgoing' : 'incoming');
       if (isPendingMessage) {
         message.classList.add('pending');
       }
@@ -3177,7 +3286,7 @@
           senderAvatar.textContent = '👤';
         }
         const senderName = document.createElement('span');
-        senderName.textContent = msg.sender_id === state.me.id ? 'شما' : (msg.sender_name || '');
+        senderName.textContent = ownMessage ? 'شما' : (msg.sender_name || '');
         senderWrap.appendChild(senderAvatar);
         senderWrap.appendChild(senderName);
         message.appendChild(senderWrap);
@@ -3204,31 +3313,6 @@
       appendMessageContent(message, msg);
 
       if (!isPendingMessage) {
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-
-        const replyBtn = document.createElement('button');
-        replyBtn.className = 'action-btn';
-        replyBtn.textContent = 'پاسخ';
-        replyBtn.addEventListener('click', () => setReply(msg));
-
-        const delMeBtn = document.createElement('button');
-        delMeBtn.className = 'action-btn';
-        delMeBtn.textContent = 'حذف برای من';
-        delMeBtn.addEventListener('click', () => deleteForMe(msg.id));
-
-        const delAllBtn = document.createElement('button');
-        delAllBtn.className = 'action-btn';
-        delAllBtn.textContent = 'حذف برای همه';
-        delAllBtn.addEventListener('click', () => deleteForEveryone(msg.id, message));
-
-        actions.appendChild(replyBtn);
-        actions.appendChild(delMeBtn);
-        if (state.me && Number(msg.sender_id) === Number(state.me.id)) {
-          actions.appendChild(delAllBtn);
-        }
-        message.appendChild(actions);
-
         const chips = buildReactionChips(msg.id, msg.reactions || [], msg.current_user_reaction);
         if (chips) {
           message.appendChild(chips);
@@ -3243,7 +3327,7 @@
       time.setAttribute('aria-label', formatDateTime(msg.created_at));
       time.textContent = formatTime(msg.created_at);
       meta.appendChild(time);
-      if (msg.sender_id === state.me.id) {
+      if (ownMessage) {
         const ticks = document.createElement('span');
         ticks.className = 'meta-ticks';
         const receipt = localStatus
@@ -3265,6 +3349,20 @@
       message.appendChild(meta);
 
       if (!isPendingMessage) {
+        message.addEventListener('click', (e) => {
+          const interactive = e.target.closest('button, a, input, textarea, select, .reaction-bar, .reaction-chip');
+          if (interactive && !interactive.classList.contains('message-more')) {
+            return;
+          }
+          e.stopPropagation();
+          if (isMobileLayout()) {
+            openMessageActionSheet(msg.id, message, msg);
+            return;
+          }
+          const rect = message.getBoundingClientRect();
+          openMessageContextMenu(msg.id, message, msg, rect.left + 12, rect.bottom + 8);
+        });
+
         message.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           if (isMobileLayout()) {
@@ -3280,7 +3378,7 @@
       inserted.push(message);
     });
 
-    const shouldScroll = !prepend && (isAtBottom() || messages.some(m => m.sender_id === state.me.id));
+    const shouldScroll = !prepend && (isAtBottom() || messages.some((m) => isOwnMessage(m)));
     if (prepend) {
       messagesEl.prepend(fragment);
     } else {
@@ -3394,6 +3492,10 @@
     const replyMessage = state.replyTo ? { ...state.replyTo } : null;
 
     if (state.pendingAttachments.length) {
+      if (state.ui.composeMode === 'edit') {
+        notify('برای ویرایش، ابتدا پیوست‌ها را پاک کنید.');
+        return;
+      }
       if (state.uploading) return;
       if (state.pendingAttachments.some(att => !groupAllows(att.type))) {
         notify('ارسال این نوع پیام در گروه مجاز نیست.');
@@ -3432,7 +3534,7 @@
         if (!isGroupChat()) {
           payload.conversation_id = state.currentConversation.id;
         }
-        if (state.replyTo) {
+        if (state.ui.composeMode === 'reply' && state.replyTo) {
           payload.reply_to_message_id = state.replyTo.id;
         }
         const optimisticAttachments = uploadItems.map((item) => ({
@@ -3463,6 +3565,15 @@
 
     const body = messageInput.value.trim();
     if (!body) return;
+    if (state.ui.composeMode === 'edit' && state.ui.editingMessageId) {
+      try {
+        await submitMessageEdit(state.ui.editingMessageId, body);
+      } catch (err) {
+        notify(err.message || 'ویرایش پیام ناموفق بود.');
+      }
+      return;
+    }
+
     const payload = {
       type: 'text',
       body: body,
@@ -3471,7 +3582,7 @@
     if (!isGroupChat()) {
       payload.conversation_id = state.currentConversation.id;
     }
-    if (state.replyTo) {
+    if (state.ui.composeMode === 'reply' && state.replyTo) {
       payload.reply_to_message_id = state.replyTo.id;
     }
     messageInput.value = '';
@@ -3482,21 +3593,133 @@
 
   function setReply(msg) {
     state.replyTo = msg;
+    state.ui.composeMode = 'reply';
+    state.ui.forwardMessageId = null;
+    state.ui.forwardMessageData = null;
+    state.ui.editingMessageId = null;
+    state.ui.editingMessageData = null;
     const previewText = msg.attachments && msg.attachments.length
       ? attachmentsLabel(msg.attachments)
       : (msg.type && msg.type !== 'text'
         ? mediaLabel(msg.type, msg.media?.original_name)
         : truncate(msg.body || '', 80));
-    replyPreview.textContent = (msg.sender_name || '') + ': ' + previewText;
+    if (replyTitle) replyTitle.textContent = 'پاسخ به';
+    replyPreview.textContent = `${msg.sender_name || ''}: ${previewText}`;
     replyBar.classList.remove('hidden');
   }
 
-  function clearReply() {
+  function setForward(msg) {
     state.replyTo = null;
+    state.ui.composeMode = 'forward';
+    state.ui.forwardMessageId = Number(msg.id);
+    state.ui.forwardMessageData = msg;
+    state.ui.editingMessageId = null;
+    state.ui.editingMessageData = null;
+    const sender = msg.sender_name || (isOwnMessage(msg) ? 'شما' : 'کاربر');
+    const summary = previewTextForPinned(msg);
+    if (replyTitle) replyTitle.textContent = 'فوروارد';
+    replyPreview.textContent = `${sender}: ${summary}`;
+    replyBar.classList.remove('hidden');
+
+    if ((msg.body || '').trim() !== '') {
+      messageInput.value = msg.body;
+      messageInput.focus();
+    } else {
+      notify('فوروارد مستقیم رسانه در این نسخه فعال نیست. ابتدا متن اضافه کنید.');
+      messageInput.focus();
+    }
+  }
+
+  function setEdit(msg) {
+    if (!isOwnMessage(msg)) {
+      notify('فقط پیام‌های خودتان قابل ویرایش هستند.');
+      return;
+    }
+    if (msg.type !== 'text' || (msg.body || '').trim() === '') {
+      notify('فعلاً فقط پیام متنی قابل ویرایش است.');
+      return;
+    }
+    state.replyTo = null;
+    state.ui.composeMode = 'edit';
+    state.ui.editingMessageId = Number(msg.id);
+    state.ui.editingMessageData = msg;
+    state.ui.forwardMessageId = null;
+    state.ui.forwardMessageData = null;
+    if (replyTitle) replyTitle.textContent = 'ویرایش';
+    replyPreview.textContent = truncate(msg.body || '', 80);
+    replyBar.classList.remove('hidden');
+    messageInput.value = msg.body || '';
+    messageInput.focus();
+  }
+
+  function clearReply() {
+    const wasEdit = state.ui.composeMode === 'edit';
+    const wasForward = state.ui.composeMode === 'forward';
+    state.replyTo = null;
+    state.ui.composeMode = null;
+    state.ui.forwardMessageId = null;
+    state.ui.forwardMessageData = null;
+    state.ui.editingMessageId = null;
+    state.ui.editingMessageData = null;
+    if (replyTitle) replyTitle.textContent = 'پاسخ به';
     replyBar.classList.add('hidden');
+    if (wasEdit || wasForward) {
+      messageInput.value = '';
+    }
+  }
+
+  function togglePinnedMessage(msg) {
+    const pinned = getPinnedForCurrentConversation();
+    if (pinned && Number(pinned.id) === Number(msg.id)) {
+      clearPinnedForCurrentConversation();
+      notify('پین پیام برداشته شد.', 'success');
+      return;
+    }
+    setPinnedForCurrentConversation(msg);
+    notify('پیام پین شد.', 'success');
+  }
+
+  async function submitMessageEdit(messageId, body) {
+    const res = await apiFetch(API.messageEdit, {
+      method: 'POST',
+      body: {
+        message_id: messageId,
+        body: body
+      }
+    });
+    if (!res.data || !res.data.ok) {
+      throw new Error(res.data?.error || 'ویرایش پیام ناموفق بود.');
+    }
+    const el = document.getElementById(`msg-${messageId}`);
+    if (el) {
+      const textEl = el.querySelector('.text');
+      if (textEl) {
+        textEl.textContent = body;
+      }
+    }
+    messageInput.value = '';
+    clearReply();
+    await loadConversations();
   }
 
   replyCancel.addEventListener('click', clearReply);
+
+  pinnedPreview?.addEventListener('click', () => {
+    const pinned = getPinnedForCurrentConversation();
+    if (!pinned || !pinned.id) return;
+    const target = document.getElementById(`msg-${pinned.id}`);
+    if (!target) {
+      notify('پیام پین‌شده در لیست فعلی نیست. برای یافتن آن اسکرول کنید.');
+      return;
+    }
+    target.scrollIntoView({ behavior: motionBehavior(), block: 'center' });
+    target.classList.add('show-reactions');
+    setTimeout(() => target.classList.remove('show-reactions'), 1200);
+  });
+
+  pinnedClear?.addEventListener('click', () => {
+    clearPinnedForCurrentConversation();
+  });
 
   sendBtn.addEventListener('click', sendMessage);
   messageInput.addEventListener('keydown', (e) => {
@@ -3511,6 +3734,10 @@
     if (res.data.ok) {
       const el = document.getElementById(`msg-${messageId}`);
       if (el) el.remove();
+      const pinned = getPinnedForCurrentConversation();
+      if (pinned && Number(pinned.id) === Number(messageId)) {
+        clearPinnedForCurrentConversation();
+      }
       await loadConversations();
     }
   }
@@ -3533,6 +3760,10 @@
         const bar = element.querySelector('.reaction-bar');
         if (bar) bar.remove();
         element.dataset.currentReaction = '';
+      }
+      const pinned = getPinnedForCurrentConversation();
+      if (pinned && Number(pinned.id) === Number(messageId)) {
+        clearPinnedForCurrentConversation();
       }
       await loadConversations();
     }
@@ -4063,6 +4294,7 @@
   });
 
   async function initialize() {
+    state.pinnedByConversation = loadPinnedState();
     if (!state.token) {
       try {
         const refreshRes = await apiFetch(API.tokenRefresh, { method: 'POST' });
@@ -4082,7 +4314,7 @@
       if (!meRes.data.ok) {
         throw new Error('ورود نامعتبر است');
       }
-      state.me = meRes.data.data.user;
+      state.me = normalizeUser(meRes.data.data.user);
       state.profilePhotos = meRes.data.data.photos || [];
       showMain();
       syncMobileView();

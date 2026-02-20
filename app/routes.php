@@ -78,6 +78,9 @@ $router->add('GET', '#^/api/unread-count$#', function () use ($config) {
 $router->add('POST', '#^/api/messages$#', function () use ($config) {
     MessageController::send($config);
 });
+$router->add('POST', '#^/api/messages/edit$#', function () use ($config) {
+    MessageController::edit($config);
+});
 $router->add('POST', '#^/api/messages/ack$#', function () use ($config) {
     MessageController::ack($config);
 });

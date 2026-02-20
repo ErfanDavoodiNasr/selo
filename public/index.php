@@ -369,6 +369,16 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
                     </div>
                     <button id="reply-cancel" class="icon-btn" aria-label="لغو پاسخ">×</button>
                 </div>
+                <div id="pinned-bar" class="pinned-bar hidden">
+                    <div class="pinned-content">
+                        <span class="material-symbols-rounded">keep</span>
+                        <span class="pinned-label">پیام پین‌شده</span>
+                        <button id="pinned-preview" type="button" class="pinned-preview" aria-label="رفتن به پیام پین شده"></button>
+                    </div>
+                    <button id="pinned-clear" class="icon-btn" title="برداشتن پین" aria-label="برداشتن پین">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
                 <div class="composer">
                     <button id="attach-btn" class="icon-btn" title="پیوست" aria-label="پیوست">
                         <span class="material-symbols-rounded">attach_file</span>

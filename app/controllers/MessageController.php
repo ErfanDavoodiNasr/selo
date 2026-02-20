@@ -341,6 +341,48 @@ class MessageController
         Response::json(['ok' => true, 'data' => ['acknowledged' => $validIds]]);
     }
 
+    public static function edit(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        self::guardWrite($config, 'send', (int)$user['id']);
+        LastSeenService::touch($config, (int)$user['id']);
+
+        $data = Request::json();
+        $messageId = (int)($data['message_id'] ?? 0);
+        $body = trim((string)($data['body'] ?? ''));
+        if ($messageId <= 0) {
+            Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
+        }
+        if ($body === '' || !Validator::messageBody($body)) {
+            Response::json(['ok' => false, 'error' => 'متن پیام معتبر نیست.'], 422);
+        }
+
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT id, sender_id, type, is_deleted_for_all FROM ' . $config['db']['prefix'] . 'messages WHERE id = ? LIMIT 1');
+        $stmt->execute([$messageId]);
+        $msg = $stmt->fetch();
+        if (!$msg || (int)$msg['sender_id'] !== (int)$user['id']) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+        if ((int)$msg['is_deleted_for_all'] === 1) {
+            Response::json(['ok' => false, 'error' => 'این پیام قابل ویرایش نیست.'], 422);
+        }
+        if ((string)$msg['type'] !== 'text') {
+            Response::json(['ok' => false, 'error' => 'فقط پیام متنی قابل ویرایش است.'], 422);
+        }
+
+        $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'messages SET body = ? WHERE id = ? AND sender_id = ? AND type = ? AND is_deleted_for_all = 0');
+        $update->execute([$body, $messageId, (int)$user['id'], 'text']);
+
+        Response::json([
+            'ok' => true,
+            'data' => [
+                'message_id' => $messageId,
+                'body' => $body,
+            ],
+        ]);
+    }
+
     public static function unreadCount(array $config): void
     {
         $user = Auth::requireUser($config);

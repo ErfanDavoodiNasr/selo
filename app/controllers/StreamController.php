@@ -60,25 +60,24 @@ class StreamController
 
             if (empty($events['messages']) && empty($events['receipts'])) {
                 $status = 204;
-                return;
-            }
+            } else {
+                foreach ($events['messages'] as $msg) {
+                    $lastMessageId = max($lastMessageId, (int)$msg['id']);
+                }
+                foreach ($events['receipts'] as $receipt) {
+                    $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
+                }
 
-            foreach ($events['messages'] as $msg) {
-                $lastMessageId = max($lastMessageId, (int)$msg['id']);
+                $payload = [
+                    'ok' => true,
+                    'data' => [
+                        'messages' => $events['messages'],
+                        'receipts' => $events['receipts'],
+                        'last_message_id' => $lastMessageId,
+                        'last_receipt_id' => $lastReceiptId,
+                    ],
+                ];
             }
-            foreach ($events['receipts'] as $receipt) {
-                $lastReceiptId = max($lastReceiptId, (int)$receipt['id']);
-            }
-
-            $payload = [
-                'ok' => true,
-                'data' => [
-                    'messages' => $events['messages'],
-                    'receipts' => $events['receipts'],
-                    'last_message_id' => $lastMessageId,
-                    'last_receipt_id' => $lastReceiptId,
-                ],
-            ];
         } finally {
             self::releaseLock($ipLock);
             self::releaseLock($userLock);

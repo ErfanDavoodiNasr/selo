@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'selo-static';
-const CACHE_VERSION = '2026-02-19-2';
+const CACHE_VERSION = '2026-02-20-2';
 const CACHE_NAME = `${CACHE_PREFIX}-${CACHE_VERSION}`;
 
 function scopeBasePath() {
@@ -71,7 +71,7 @@ self.addEventListener('activate', (event) => {
 
 async function cacheFirst(request) {
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: true });
+  const cached = await cache.match(request);
   if (cached) {
     return cached;
   }
@@ -132,7 +132,7 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(request).catch(async () => {
       const cache = await caches.open(CACHE_NAME);
-      return cache.match(request, { ignoreSearch: true });
+      return cache.match(request);
     })
   );
 });
