@@ -6,6 +6,7 @@ use App\Core\Database;
 use App\Core\LastSeenService;
 use App\Core\MessageReceiptService;
 use App\Core\PresenceService;
+use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
 use PDOException;
@@ -15,6 +16,9 @@ class ConversationController
     public static function list(array $config): void
     {
         $user = Auth::requireUser($config);
+        $limit = (int)Request::param('limit', 50);
+        $limit = max(20, min(200, $limit));
+        $perTypeLimit = min(400, $limit * 2);
         $pdo = Database::pdo();
         $sql = 'SELECT c.id, c.created_at AS conv_created_at, c.last_message_at, m.body AS last_body, m.type AS last_type, m.sender_id AS last_sender_id,
                 m.attachments_count AS last_attachments_count,
@@ -29,7 +33,8 @@ class ConversationController
                 LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'user_profile_photos up ON up.id = u.active_photo_id
                 WHERE c.user_one_id = ? OR c.user_two_id = ?
-                ORDER BY c.last_message_at DESC, c.id DESC';
+                ORDER BY c.last_message_at DESC, c.id DESC
+                LIMIT ' . $perTypeLimit;
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$user['id'], $user['id'], $user['id']]);
         $directs = $stmt->fetchAll();
@@ -80,7 +85,9 @@ class ConversationController
                 ) glast ON glast.group_id = g.id
                 LEFT JOIN ' . $config['db']['prefix'] . 'messages m ON m.id = glast.last_message_id
                 LEFT JOIN ' . $config['db']['prefix'] . 'media_files mf ON mf.id = m.media_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'users su ON su.id = m.sender_id';
+                LEFT JOIN ' . $config['db']['prefix'] . 'users su ON su.id = m.sender_id
+                ORDER BY COALESCE(m.created_at, g.created_at) DESC, g.id DESC
+                LIMIT ' . $perTypeLimit;
         $gStmt = $pdo->prepare($groupSql);
         $gStmt->execute([$user['id'], 'active', $user['id'], 'active']);
         $groups = $gStmt->fetchAll();
@@ -108,6 +115,9 @@ class ConversationController
         usort($all, function ($a, $b) {
             return strcmp($b['sort_time'], $a['sort_time']);
         });
+        if (count($all) > $limit) {
+            $all = array_slice($all, 0, $limit);
+        }
         foreach ($all as &$item) {
             unset($item['sort_time']);
         }
@@ -118,6 +128,7 @@ class ConversationController
     public static function start(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'conversation_start', (int)$user['id']);
         $data = Request::json();
         $otherId = (int)($data['user_id'] ?? 0);
         if ($otherId <= 0 || $otherId === (int)$user['id']) {
@@ -184,5 +195,25 @@ class ConversationController
         $sqlState = (string)$e->getCode();
         $driverCode = (int)($e->errorInfo[1] ?? 0);
         return $sqlState === '23000' || $driverCode === 1062;
+    }
+
+    private static function guardWrite(array $config, string $endpoint, int $userId): void
+    {
+        self::enforceBodyLimit($config, $endpoint);
+        if (RateLimiter::endpointIsLimited($config, $endpoint, $userId)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, $endpoint, $userId);
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
     }
 }

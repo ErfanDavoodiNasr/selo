@@ -38,23 +38,39 @@ class AuthController
         $pdo = Database::pdo();
         $hash = hash('sha256', $rawRefresh);
         $table = $config['db']['prefix'] . 'refresh_tokens';
-        $find = $pdo->prepare('SELECT id, user_id FROM ' . $table . ' WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > NOW() LIMIT 1');
-        $find->execute([$hash]);
-        $row = $find->fetch();
-        if (!$row) {
-            self::clearAuthCookies($config);
-            Response::json(['ok' => false, 'error' => 'نشست منقضی شده است.'], 401);
-        }
-        $userId = (int)$row['user_id'];
-        $newRefresh = bin2hex(random_bytes(32));
-        $refreshTtlSeconds = self::refreshTtlSeconds($config);
-        $newExpiresAt = date('Y-m-d H:i:s', time() + $refreshTtlSeconds);
+        $newRefresh = null;
+        $token = null;
+        $csrfToken = null;
 
         $pdo->beginTransaction();
         try {
-            $pdo->prepare('UPDATE ' . $table . ' SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL')->execute([(int)$row['id']]);
+            $lock = $pdo->prepare('SELECT id, user_id FROM ' . $table . ' WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > NOW() LIMIT 1 FOR UPDATE');
+            $lock->execute([$hash]);
+            $row = $lock->fetch();
+            if (!$row) {
+                $pdo->rollBack();
+                self::clearAuthCookies($config);
+                Response::json(['ok' => false, 'error' => 'نشست منقضی شده است.'], 401);
+            }
+
+            $userId = (int)$row['user_id'];
+            $newRefresh = bin2hex(random_bytes(32));
+            $refreshTtlSeconds = self::refreshTtlSeconds($config);
+            $newExpiresAt = date('Y-m-d H:i:s', time() + $refreshTtlSeconds);
+
+            $revoke = $pdo->prepare('UPDATE ' . $table . ' SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL');
+            $revoke->execute([(int)$row['id']]);
+            if ((int)$revoke->rowCount() !== 1) {
+                $pdo->rollBack();
+                self::clearAuthCookies($config);
+                Response::json(['ok' => false, 'error' => 'نشست منقضی شده است.'], 401);
+            }
+
             $insert = $pdo->prepare('INSERT INTO ' . $table . ' (user_id, token_hash, expires_at, created_at, revoked_at, rotated_from_id) VALUES (?, ?, ?, NOW(), NULL, ?)');
             $insert->execute([$userId, hash('sha256', $newRefresh), $newExpiresAt, (int)$row['id']]);
+
+            $token = Auth::issueToken(['id' => $userId], $config);
+            $csrfToken = self::generateCsrfToken();
             $pdo->commit();
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
@@ -63,10 +79,9 @@ class AuthController
             Response::json(['ok' => false, 'error' => 'تمدید نشست ممکن نیست.'], 500);
         }
 
-        $token = Auth::issueToken(['id' => $userId], $config);
-        $csrfToken = self::setAuthCookies($config, $token);
+        self::setAuthCookiesWithCsrf($config, (string)$token, (string)$csrfToken);
         self::setRefreshCookie($config, $newRefresh);
-        Response::json(['ok' => true, 'data' => ['token' => $token, 'csrf_token' => $csrfToken]]);
+        Response::json(['ok' => true, 'data' => ['token' => (string)$token, 'csrf_token' => (string)$csrfToken]]);
     }
 
     public static function register(array $config): void
@@ -154,8 +169,14 @@ class AuthController
             Logger::warn('login_failed', ['reason' => 'missing_credentials', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'اطلاعات ورود ناقص است.'], 422);
         }
+        if (mb_strlen($identifier) > 190) {
+            Logger::warn('login_failed', ['reason' => 'identifier_too_long'], 'auth');
+            Response::json(['ok' => false, 'error' => 'شناسه ورود بیش از حد طولانی است.'], 422);
+        }
 
-        if (RateLimiter::tooManyAttempts($ip, $identifier, $config)) {
+        $rateIdentifier = hash('sha256', $identifier);
+
+        if (RateLimiter::tooManyAttempts($ip, $rateIdentifier, $config)) {
             Logger::warn('login_failed', ['reason' => 'rate_limited', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'تلاش‌های ناموفق زیاد است. لطفاً بعداً تلاش کنید.'], 429);
         }
@@ -166,12 +187,12 @@ class AuthController
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($password, $user['password_hash'])) {
-            RateLimiter::hit($ip, $identifier, $config);
+            RateLimiter::hit($ip, $rateIdentifier, $config);
             Logger::warn('login_failed', ['reason' => 'invalid_credentials', 'identifier' => $identifier], 'auth');
             Response::json(['ok' => false, 'error' => 'نام کاربری/ایمیل یا رمز عبور اشتباه است.'], 401);
         }
 
-        RateLimiter::clear($ip, $identifier, $config);
+        RateLimiter::clear($ip, $rateIdentifier, $config);
         $token = Auth::issueToken($user, $config);
         $csrfToken = self::setAuthCookies($config, $token);
         self::issueRefreshToken($config, (int)$user['id']);
@@ -186,6 +207,17 @@ class AuthController
         if ($ttlSeconds <= 0) {
             $ttlSeconds = 3600;
         }
+        $csrfToken = self::generateCsrfToken();
+        self::setAuthCookiesWithCsrf($config, $token, $csrfToken);
+        return $csrfToken;
+    }
+
+    private static function setAuthCookiesWithCsrf(array $config, string $token, string $csrfToken): void
+    {
+        $ttlSeconds = (int)($config['app']['jwt_ttl_seconds'] ?? 3600);
+        if ($ttlSeconds <= 0) {
+            $ttlSeconds = 3600;
+        }
         $secure = self::isSecureRequest();
         setcookie('selo_token', $token, [
             'expires' => time() + $ttlSeconds,
@@ -194,7 +226,6 @@ class AuthController
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
-        $csrfToken = self::generateCsrfToken();
         setcookie('selo_csrf', $csrfToken, [
             'expires' => time() + $ttlSeconds,
             'path' => '/',
@@ -202,7 +233,6 @@ class AuthController
             'httponly' => false,
             'samesite' => 'Lax',
         ]);
-        return $csrfToken;
     }
 
     private static function clearAuthCookies(array $config): void
@@ -234,8 +264,22 @@ class AuthController
 
     private static function isSecureRequest(): bool
     {
-        return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+        if ((!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443')) {
+            return true;
+        }
+
+        $remoteIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+        if (!self::isTrustedProxy($remoteIp)) {
+            return false;
+        }
+
+        $forwardedProto = trim((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+        if ($forwardedProto === '') {
+            return false;
+        }
+        $firstProto = strtolower(trim(explode(',', $forwardedProto)[0]));
+        return $firstProto === 'https';
     }
 
     private static function generateCsrfToken(): string
@@ -325,21 +369,23 @@ class AuthController
             return;
         }
         $table = $config['db']['prefix'] . 'refresh_tokens';
-        $pdo = Database::pdo();
-        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `user_id` INT UNSIGNED NOT NULL,
-            `token_hash` CHAR(64) NOT NULL,
-            `expires_at` DATETIME NOT NULL,
-            `created_at` DATETIME NOT NULL,
-            `revoked_at` DATETIME NULL,
-            `rotated_from_id` BIGINT UNSIGNED NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_token_hash` (`token_hash`),
-            KEY `idx_user_active` (`user_id`, `revoked_at`, `expires_at`),
-            KEY `idx_expires_at` (`expires_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        if (!Database::tableExists($table)) {
+            Response::json(['ok' => false, 'error' => 'ساختار پایگاه‌داده ناقص است. لطفاً migration نصب را اجرا کنید.'], 500);
+        }
         self::$refreshTableEnsured = true;
+    }
+
+    private static function isTrustedProxy(string $ip): bool
+    {
+        if ($ip === '' || filter_var($ip, FILTER_VALIDATE_IP) === false) {
+            return false;
+        }
+        $raw = trim((string)getenv('SELO_TRUSTED_PROXIES'));
+        if ($raw === '') {
+            return false;
+        }
+        $proxies = array_filter(array_map('trim', explode(',', $raw)));
+        return in_array($ip, $proxies, true);
     }
 
 }

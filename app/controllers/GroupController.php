@@ -25,6 +25,7 @@ class GroupController
     public static function create(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_create', (int)$user['id']);
         $data = Request::json();
         $title = trim($data['title'] ?? '');
         $privacy = strtolower(trim($data['privacy_type'] ?? 'private'));
@@ -186,6 +187,7 @@ class GroupController
     public static function update(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_update', (int)$user['id']);
         $pdo = Database::pdo();
         $group = self::fetchGroupById($pdo, $config, $groupId);
         if (!$group) {
@@ -251,6 +253,7 @@ class GroupController
     public static function join(array $config, string $groupKey): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_join', (int)$user['id']);
         $pdo = Database::pdo();
         $group = self::resolveGroup($pdo, $config, $groupKey);
         if (!$group) {
@@ -280,6 +283,7 @@ class GroupController
     public static function joinByLink(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_join', (int)$user['id']);
         $data = Request::json();
         $token = trim((string)($data['token'] ?? ''));
         if ($token === '') {
@@ -299,6 +303,7 @@ class GroupController
     public static function invite(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_invite', (int)$user['id']);
         $pdo = Database::pdo();
         $group = self::fetchGroupById($pdo, $config, $groupId);
         if (!$group) {
@@ -345,6 +350,7 @@ class GroupController
     public static function removeMember(array $config, int $groupId, int $memberId): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'group_remove_member', (int)$user['id']);
         $pdo = Database::pdo();
         $group = self::fetchGroupById($pdo, $config, $groupId);
         if (!$group) {
@@ -475,11 +481,7 @@ class GroupController
     public static function sendMessage(array $config, int $groupId): void
     {
         $user = Auth::requireUser($config);
-        self::enforceBodyLimit($config, 'send');
-        if (RateLimiter::endpointIsLimited($config, 'send', (int)$user['id'])) {
-            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
-        }
-        RateLimiter::hitEndpoint($config, 'send', (int)$user['id']);
+        self::guardWrite($config, 'send', (int)$user['id']);
 
         LastSeenService::touch($config, (int)$user['id']);
         if ($groupId <= 0) {
@@ -513,8 +515,8 @@ class GroupController
 
         // Client-side de-duplication for retries.
         if ($clientId !== '') {
-            $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? LIMIT 1');
-            $dupStmt->execute([$user['id'], $clientId]);
+            $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? AND group_id = ? LIMIT 1');
+            $dupStmt->execute([$user['id'], $clientId, $groupId]);
             $dup = $dupStmt->fetch();
             if ($dup) {
                 Response::json(['ok' => true, 'data' => ['message_id' => (int)$dup['id'], 'deduped' => true]]);
@@ -601,6 +603,19 @@ class GroupController
             $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET updated_at = ? WHERE id = ?');
             $update->execute([$now, $groupId]);
             $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($clientId !== '' && self::isUniqueViolation($e)) {
+                $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? AND group_id = ? LIMIT 1');
+                $dupStmt->execute([$user['id'], $clientId, $groupId]);
+                $dup = $dupStmt->fetch();
+                if ($dup) {
+                    Response::json(['ok' => true, 'data' => ['message_id' => (int)$dup['id'], 'deduped' => true]]);
+                }
+            }
+            Response::json(['ok' => false, 'error' => 'ارسال پیام ناموفق بود.'], 500);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -667,6 +682,15 @@ class GroupController
         }
     }
 
+    private static function guardWrite(array $config, string $endpoint, int $userId): void
+    {
+        self::enforceBodyLimit($config, $endpoint);
+        if (RateLimiter::endpointIsLimited($config, $endpoint, $userId)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, $endpoint, $userId);
+    }
+
     private static function getMembership($pdo, array $config, int $groupId, int $userId): ?array
     {
         $stmt = $pdo->prepare('SELECT role, status FROM ' . $config['db']['prefix'] . 'group_members WHERE group_id = ? AND user_id = ? LIMIT 1');
@@ -709,6 +733,22 @@ class GroupController
     {
         self::ensureInviteTokenTable($pdo, $config);
         self::cleanupExpiredInviteTokens($pdo, $config);
+        $table = $config['db']['prefix'] . 'group_invite_tokens';
+        $groupsTable = $config['db']['prefix'] . 'groups';
+        $reuseStmt = $pdo->prepare('SELECT g.private_invite_token, t.expires_at
+            FROM ' . $groupsTable . ' g
+            LEFT JOIN ' . $table . ' t
+              ON t.group_id = g.id
+             AND t.token_hash = SHA2(g.private_invite_token, 256)
+             AND t.used_at IS NULL
+             AND t.expires_at > NOW()
+            WHERE g.id = ?
+            LIMIT 1');
+        $reuseStmt->execute([$groupId]);
+        $existing = $reuseStmt->fetch();
+        if ($existing && !empty($existing['private_invite_token']) && !empty($existing['expires_at'])) {
+            return (string)$existing['private_invite_token'];
+        }
         $rawToken = bin2hex(random_bytes(24));
         $tokenHash = hash('sha256', $rawToken);
         $ttl = (int)($config['groups']['invite_token_ttl_seconds'] ?? self::INVITE_TOKEN_TTL_SECONDS);
@@ -716,9 +756,9 @@ class GroupController
             $ttl = self::INVITE_TOKEN_TTL_SECONDS;
         }
         $expiresAt = date('Y-m-d H:i:s', time() + $ttl);
-        $table = $config['db']['prefix'] . 'group_invite_tokens';
         $insert = $pdo->prepare('INSERT INTO ' . $table . ' (group_id, token_hash, issued_by_user_id, expires_at, used_at, used_by_user_id, created_at) VALUES (?, ?, ?, ?, NULL, NULL, NOW())');
         $insert->execute([$groupId, $tokenHash, $issuedByUserId, $expiresAt]);
+        $pdo->prepare('UPDATE ' . $groupsTable . ' SET private_invite_token = ?, updated_at = NOW() WHERE id = ?')->execute([$rawToken, $groupId]);
         return $rawToken;
     }
 
@@ -773,6 +813,8 @@ class GroupController
                 $pdo->rollBack();
                 return null;
             }
+            $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'groups SET private_invite_token = NULL, updated_at = NOW() WHERE id = ? AND private_invite_token = ?')
+                ->execute([(int)$tokenRow['group_id'], $token]);
 
             $pdo->commit();
             return $group;
@@ -790,25 +832,9 @@ class GroupController
             return;
         }
         $table = $config['db']['prefix'] . 'group_invite_tokens';
-        $groupsTable = $config['db']['prefix'] . 'groups';
-        $usersTable = $config['db']['prefix'] . 'users';
-        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `group_id` BIGINT UNSIGNED NOT NULL,
-            `token_hash` CHAR(64) NOT NULL,
-            `issued_by_user_id` INT UNSIGNED NOT NULL,
-            `expires_at` DATETIME NOT NULL,
-            `used_at` DATETIME NULL,
-            `used_by_user_id` INT UNSIGNED NULL,
-            `created_at` DATETIME NOT NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_token_hash` (`token_hash`),
-            KEY `idx_group_active` (`group_id`, `used_at`, `expires_at`),
-            KEY `idx_expires_at` (`expires_at`),
-            CONSTRAINT `fk_group_invite_tokens_group` FOREIGN KEY (`group_id`) REFERENCES `' . $groupsTable . '` (`id`) ON DELETE CASCADE,
-            CONSTRAINT `fk_group_invite_tokens_issuer` FOREIGN KEY (`issued_by_user_id`) REFERENCES `' . $usersTable . '` (`id`) ON DELETE CASCADE,
-            CONSTRAINT `fk_group_invite_tokens_used_by` FOREIGN KEY (`used_by_user_id`) REFERENCES `' . $usersTable . '` (`id`) ON DELETE SET NULL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        if (!Database::tableExists($table)) {
+            Response::json(['ok' => false, 'error' => 'ساختار پایگاه‌داده ناقص است. لطفاً migration نصب را اجرا کنید.'], 500);
+        }
         self::$inviteTokenTableEnsured = true;
     }
 
@@ -819,5 +845,12 @@ class GroupController
         }
         $table = $config['db']['prefix'] . 'group_invite_tokens';
         $pdo->exec('DELETE FROM `' . $table . '` WHERE expires_at < NOW() OR used_at IS NOT NULL LIMIT 300');
+    }
+
+    private static function isUniqueViolation(\PDOException $e): bool
+    {
+        $sqlState = (string)$e->getCode();
+        $driverCode = (int)($e->errorInfo[1] ?? 0);
+        return $sqlState === '23000' || $driverCode === 1062;
     }
 }

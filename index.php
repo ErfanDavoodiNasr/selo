@@ -7,8 +7,36 @@ function servePublicAsset(string $path): void
     if ($publicRoot === false) {
         return;
     }
-    $target = realpath($publicRoot . '/' . ltrim($path, '/'));
-    if ($target === false || strpos($target, $publicRoot . DIRECTORY_SEPARATOR) !== 0 || !is_file($target)) {
+    $cleanPath = ltrim(rawurldecode($path), '/');
+    if ($cleanPath === '' || strpos($cleanPath, '..') !== false || strpos($cleanPath, '\\') !== false) {
+        return;
+    }
+    $allowedExact = ['sw.js', 'favicon.ico'];
+    $isAssetPath = (bool)preg_match('#^assets/[A-Za-z0-9/_\.\-]+$#', $cleanPath);
+    if (!$isAssetPath && !in_array($cleanPath, $allowedExact, true)) {
+        return;
+    }
+
+    $target = realpath($publicRoot . '/' . $cleanPath);
+    if ($target === false || !is_file($target)) {
+        return;
+    }
+    if ($isAssetPath) {
+        $assetRoot = realpath($publicRoot . '/assets');
+        if ($assetRoot === false || strpos($target, $assetRoot . DIRECTORY_SEPARATOR) !== 0) {
+            return;
+        }
+    } else {
+        $allowedRoots = [
+            realpath($publicRoot . '/sw.js'),
+            realpath($publicRoot . '/favicon.ico'),
+        ];
+        if (!in_array($target, array_filter($allowedRoots), true)) {
+            return;
+        }
+    }
+
+    if (strpos($target, $publicRoot . DIRECTORY_SEPARATOR) !== 0) {
         return;
     }
 
@@ -30,21 +58,14 @@ function servePublicAsset(string $path): void
         'map' => 'application/json; charset=UTF-8',
         'webmanifest' => 'application/manifest+json; charset=UTF-8',
     ];
-    $mime = $map[$ext] ?? 'application/octet-stream';
-    if (!isset($map[$ext]) && function_exists('finfo_open')) {
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        if ($finfo) {
-            $detected = finfo_file($finfo, $target);
-            if (is_string($detected) && $detected !== '') {
-                $mime = $detected;
-            }
-            finfo_close($finfo);
-        }
+    if (!isset($map[$ext])) {
+        return;
     }
+    $mime = $map[$ext];
 
     header('Content-Type: ' . $mime);
     header('X-Content-Type-Options: nosniff');
-    if ($path === 'sw.js') {
+    if ($cleanPath === 'sw.js') {
         header('Cache-Control: no-cache, no-store, must-revalidate');
     } else {
         header('Cache-Control: public, max-age=31536000, immutable');

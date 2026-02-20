@@ -119,11 +119,7 @@ class MessageController
     public static function send(array $config): void
     {
         $user = Auth::requireUser($config);
-        self::enforceBodyLimit($config, 'send');
-        if (RateLimiter::endpointIsLimited($config, 'send', (int)$user['id'])) {
-            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
-        }
-        RateLimiter::hitEndpoint($config, 'send', (int)$user['id']);
+        self::guardWrite($config, 'send', (int)$user['id']);
 
         LastSeenService::touch($config, (int)$user['id']);
         $data = Request::json();
@@ -153,8 +149,8 @@ class MessageController
 
         // Client-side de-duplication for retries.
         if ($clientId !== '') {
-            $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? LIMIT 1');
-            $dupStmt->execute([$user['id'], $clientId]);
+            $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? AND conversation_id = ? LIMIT 1');
+            $dupStmt->execute([$user['id'], $clientId, $conversationId]);
             $dup = $dupStmt->fetch();
             if ($dup) {
                 Response::json(['ok' => true, 'data' => ['message_id' => (int)$dup['id'], 'deduped' => true]]);
@@ -231,12 +227,28 @@ class MessageController
                 MediaLifecycleService::markAttached($config, $mediaIds);
             }
 
-            $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations SET last_message_id = ?, last_message_at = ? WHERE id = ?');
-            $update->execute([$messageId, $now, $conversationId]);
+            $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'conversations
+                SET last_message_at = IF(last_message_id IS NULL OR last_message_id < ?, ?, last_message_at),
+                    last_message_id = IF(last_message_id IS NULL OR last_message_id < ?, ?, last_message_id)
+                WHERE id = ?');
+            $update->execute([$messageId, $now, $messageId, $messageId, $conversationId]);
 
             $receiptInsert = $pdo->prepare('INSERT IGNORE INTO ' . $config['db']['prefix'] . 'message_receipts (message_id, user_id, status, created_at) VALUES (?, ?, ?, ?)');
             $receiptInsert->execute([$messageId, (int)$recipientId, 'delivered', $now]);
             $pdo->commit();
+        } catch (\PDOException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if ($clientId !== '' && self::isUniqueViolation($e)) {
+                $dupStmt = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'messages WHERE sender_id = ? AND client_id = ? AND conversation_id = ? LIMIT 1');
+                $dupStmt->execute([$user['id'], $clientId, $conversationId]);
+                $dup = $dupStmt->fetch();
+                if ($dup) {
+                    Response::json(['ok' => true, 'data' => ['message_id' => (int)$dup['id'], 'deduped' => true]]);
+                }
+            }
+            Response::json(['ok' => false, 'error' => 'ارسال پیام ناموفق بود.'], 500);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -345,6 +357,7 @@ class MessageController
     public static function markRead(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'mark_read', (int)$user['id']);
         $data = Request::json();
         $conversationId = (int)($data['conversation_id'] ?? 0);
         $upTo = isset($data['up_to_message_id']) ? (int)$data['up_to_message_id'] : null;
@@ -396,6 +409,7 @@ class MessageController
     public static function deleteForMe(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'delete_for_me', (int)$user['id']);
         $data = Request::json();
         $messageId = (int)($data['message_id'] ?? 0);
         if ($messageId <= 0) {
@@ -425,13 +439,14 @@ class MessageController
     public static function deleteForEveryone(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'delete_for_everyone', (int)$user['id']);
         $data = Request::json();
         $messageId = (int)($data['message_id'] ?? 0);
         if ($messageId <= 0) {
             Response::json(['ok' => false, 'error' => 'پیام نامعتبر است.'], 422);
         }
         $pdo = Database::pdo();
-        $stmt = $pdo->prepare('SELECT m.id, m.conversation_id, m.group_id, m.sender_id, m.recipient_id,
+        $stmt = $pdo->prepare('SELECT m.id, m.conversation_id, m.group_id, m.sender_id, m.recipient_id, m.media_id,
                 g.owner_user_id,
                 gm.user_id AS member_id
             FROM ' . $config['db']['prefix'] . 'messages m
@@ -457,15 +472,47 @@ class MessageController
         if (!$allowed) {
             Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
         }
-        $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'messages SET is_deleted_for_all = 1 WHERE id = ?');
-        $update->execute([$messageId]);
-        $pdo->prepare('DELETE FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ?')->execute([$messageId]);
+
+        $mediaIds = [];
+        if (!empty($row['media_id'])) {
+            $mediaIds[] = (int)$row['media_id'];
+        }
+        $attStmt = $pdo->prepare('SELECT media_id FROM ' . $config['db']['prefix'] . 'message_attachments WHERE message_id = ?');
+        $attStmt->execute([$messageId]);
+        foreach ($attStmt->fetchAll() as $att) {
+            $mid = (int)($att['media_id'] ?? 0);
+            if ($mid > 0) {
+                $mediaIds[] = $mid;
+            }
+        }
+        $mediaIds = array_values(array_unique($mediaIds));
+
+        try {
+            $pdo->beginTransaction();
+            $update = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'messages
+                SET is_deleted_for_all = 1, body = NULL, media_id = NULL, attachments_count = 0
+                WHERE id = ?');
+            $update->execute([$messageId]);
+            $pdo->prepare('DELETE FROM ' . $config['db']['prefix'] . 'message_attachments WHERE message_id = ?')->execute([$messageId]);
+            $pdo->prepare('DELETE FROM ' . $config['db']['prefix'] . 'message_reactions WHERE message_id = ?')->execute([$messageId]);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Response::json(['ok' => false, 'error' => 'حذف پیام ناموفق بود.'], 500);
+        }
+
+        foreach ($mediaIds as $mediaId) {
+            MediaLifecycleService::deleteIfUnreferenced($config, $mediaId);
+        }
         Response::json(['ok' => true]);
     }
 
     public static function react(array $config, int $messageId): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'react', (int)$user['id']);
         $data = Request::json();
         $emoji = trim((string)($data['emoji'] ?? ''));
         if ($messageId <= 0) {
@@ -627,5 +674,21 @@ class MessageController
         if (count($items) > $max) {
             Response::json(['ok' => false, 'error' => 'تعداد آیتم‌های درخواست بیش از حد مجاز است.'], 422);
         }
+    }
+
+    private static function guardWrite(array $config, string $endpoint, int $userId): void
+    {
+        self::enforceBodyLimit($config, $endpoint);
+        if (RateLimiter::endpointIsLimited($config, $endpoint, $userId)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, $endpoint, $userId);
+    }
+
+    private static function isUniqueViolation(\PDOException $e): bool
+    {
+        $sqlState = (string)$e->getCode();
+        $driverCode = (int)($e->errorInfo[1] ?? 0);
+        return $sqlState === '23000' || $driverCode === 1062;
     }
 }

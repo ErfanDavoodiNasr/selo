@@ -191,21 +191,7 @@ class RateLimiter
         if ($ready) {
             return;
         }
-        $pdo = Database::pdo();
-        $table = self::reactionTable($config);
-        $sql = 'CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `ip` VARCHAR(45) NOT NULL,
-            `identifier` VARCHAR(190) NOT NULL,
-            `attempts` INT UNSIGNED NOT NULL DEFAULT 0,
-            `last_attempt_at` DATETIME NOT NULL,
-            `lock_until` DATETIME NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_ip_identifier` (`ip`, `identifier`),
-            KEY `idx_last_attempt` (`last_attempt_at`),
-            KEY `idx_lock_until` (`lock_until`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4';
-        $pdo->exec($sql);
+        self::requireTable(self::reactionTable($config));
         $ready = true;
     }
 
@@ -214,44 +200,7 @@ class RateLimiter
         if (self::$loginReady) {
             return;
         }
-        $pdo = Database::pdo();
-        $table = self::loginTable($config);
-        $createSql = 'CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `ip` VARCHAR(45) NOT NULL,
-            `identifier` VARCHAR(190) NOT NULL,
-            `attempts` INT UNSIGNED NOT NULL DEFAULT 0,
-            `last_attempt_at` DATETIME NOT NULL,
-            `lock_until` DATETIME NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_ip_identifier` (`ip`, `identifier`),
-            KEY `idx_last_attempt` (`last_attempt_at`),
-            KEY `idx_lock_until` (`lock_until`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4';
-        $pdo->exec($createSql);
-
-        try {
-            $pdo->exec('DELETE t1 FROM `' . $table . '` t1
-                INNER JOIN `' . $table . '` t2
-                ON t1.ip = t2.ip AND t1.identifier = t2.identifier AND t1.id < t2.id');
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        try {
-            $pdo->exec('ALTER TABLE `' . $table . '` ADD UNIQUE KEY `uniq_ip_identifier` (`ip`, `identifier`)');
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        try {
-            $pdo->exec('ALTER TABLE `' . $table . '` ADD KEY `idx_last_attempt` (`last_attempt_at`)');
-        } catch (\Throwable $e) {
-            // ignore
-        }
-        try {
-            $pdo->exec('ALTER TABLE `' . $table . '` ADD KEY `idx_lock_until` (`lock_until`)');
-        } catch (\Throwable $e) {
-            // ignore
-        }
+        self::requireTable(self::loginTable($config));
         self::$loginReady = true;
     }
 
@@ -260,22 +209,16 @@ class RateLimiter
         if (self::$endpointReady) {
             return;
         }
-        $pdo = Database::pdo();
-        $table = self::endpointTable($config);
-        $createSql = 'CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `identifier` VARCHAR(255) NOT NULL,
-            `attempts` INT UNSIGNED NOT NULL DEFAULT 0,
-            `penalty_level` INT UNSIGNED NOT NULL DEFAULT 0,
-            `last_attempt_at` DATETIME NOT NULL,
-            `lock_until` DATETIME NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_identifier` (`identifier`),
-            KEY `idx_last_attempt` (`last_attempt_at`),
-            KEY `idx_lock_until` (`lock_until`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4';
-        $pdo->exec($createSql);
+        self::requireTable(self::endpointTable($config));
         self::$endpointReady = true;
+    }
+
+    private static function requireTable(string $table): void
+    {
+        if (Database::tableExists($table)) {
+            return;
+        }
+        Response::json(['ok' => false, 'error' => 'ساختار پایگاه‌داده ناقص است. لطفاً migration نصب را اجرا کنید.'], 500);
     }
 
     private static function endpointPolicy(array $config, string $endpoint): array

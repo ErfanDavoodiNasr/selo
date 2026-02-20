@@ -4,9 +4,11 @@ namespace App\Controllers;
 use App\Core\Auth;
 use App\Core\Database;
 use App\Core\LastSeenService;
+use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Validator;
+use PDOException;
 
 class UserController
 {
@@ -26,6 +28,7 @@ class UserController
     public static function update(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'me_update', (int)$user['id']);
         $data = Request::json();
         $fullName = trim($data['full_name'] ?? $user['full_name']);
         $username = strtolower(trim($data['username'] ?? $user['username']));
@@ -67,13 +70,21 @@ class UserController
 
         $now = date('Y-m-d H:i:s');
         $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
-        $stmt->execute([$fullName, $username, $bio, $phone, $email, $now, $user['id']]);
+        try {
+            $stmt->execute([$fullName, $username, $bio, $phone, $email, $now, $user['id']]);
+        } catch (PDOException $e) {
+            if (self::isUniqueViolation($e)) {
+                Response::json(['ok' => false, 'error' => 'نام کاربری/ایمیل تکراری است.'], 409);
+            }
+            throw $e;
+        }
         Response::json(['ok' => true]);
     }
 
     public static function updateSettings(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'me_settings', (int)$user['id']);
         $data = Request::json();
         $updates = [];
         $values = [];
@@ -116,5 +127,32 @@ class UserController
         $stmt->execute([$query . '%']);
         $users = $stmt->fetchAll();
         Response::json(['ok' => true, 'data' => $users]);
+    }
+
+    private static function guardWrite(array $config, string $endpoint, int $userId): void
+    {
+        self::enforceBodyLimit($config, $endpoint);
+        if (RateLimiter::endpointIsLimited($config, $endpoint, $userId)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, $endpoint, $userId);
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
+    }
+
+    private static function isUniqueViolation(PDOException $e): bool
+    {
+        $sqlState = (string)$e->getCode();
+        $driverCode = (int)($e->errorInfo[1] ?? 0);
+        return $sqlState === '23000' || $driverCode === 1062;
     }
 }

@@ -5,6 +5,7 @@ $basePath = dirname(__DIR__, 2);
 $configFile = $basePath . '/config/config.php';
 $installLogFile = $basePath . '/storage/logs/install.log';
 $installTokenUsedFile = $basePath . '/storage/install_token_used.flag';
+$installUnlockFile = $basePath . '/storage/.install_unlock';
 $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
 $scriptDir = rtrim(dirname($scriptName), '/');
 $scriptBase = basename($scriptName);
@@ -78,7 +79,7 @@ function requestInstallerToken(): ?string
 
 function enforceInstallerAccess(): void
 {
-    global $installTokenUsedFile;
+    global $installTokenUsedFile, $installUnlockFile;
 
     $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
     if (!isValidIp($ip)) {
@@ -91,8 +92,13 @@ function enforceInstallerAccess(): void
 
     $requiredToken = trim((string)getenv('SELO_INSTALL_TOKEN'));
     if ($requiredToken === '') {
-        // Default shared-hosting behavior: allow installer when no token policy is configured.
-        return;
+        if (is_file($installUnlockFile)) {
+            return;
+        }
+        installLog('installer_access_denied ip=' . $ip . ' reason=locked');
+        http_response_code(403);
+        echo 'Installer is locked.';
+        exit;
     }
 
     if (is_file($installTokenUsedFile)) {
@@ -120,13 +126,16 @@ function enforceInstallerAccess(): void
 
 function consumeInstallerToken(string $ip): void
 {
-    global $installTokenUsedFile;
+    global $installTokenUsedFile, $installUnlockFile;
 
     if (is_file($installTokenUsedFile)) {
         return;
     }
 
     @file_put_contents($installTokenUsedFile, date('c') . ' ' . $ip);
+    if (is_file($installUnlockFile)) {
+        @unlink($installUnlockFile);
+    }
     installLog('installer_token_consumed ip=' . $ip);
 }
 
@@ -242,16 +251,136 @@ function normalizeDbPrefix(string $rawPrefix, array &$errors): string
 $defaultUploads = [
     'max_size' => 2 * 1024 * 1024,
     'media_max_size' => 20 * 1024 * 1024,
+    'user_total_quota_bytes' => 512 * 1024 * 1024,
+    'user_daily_quota_bytes' => 128 * 1024 * 1024,
+    'app_total_quota_bytes' => 2 * 1024 * 1024 * 1024,
+    'app_total_files_limit' => 50000,
+    'pending_ttl_seconds' => 6 * 60 * 60,
+    'gc_max_items' => 25,
     'photo_max_size' => 5 * 1024 * 1024,
     'video_max_size' => 25 * 1024 * 1024,
     'voice_max_size' => 10 * 1024 * 1024,
     'file_max_size' => 20 * 1024 * 1024,
+    'max_files_per_request' => 10,
+    'max_photos_per_request' => 10,
+    'max_videos_per_request' => 10,
+    'thumbnail_max_size' => 480,
+    'image_max_width' => 8000,
+    'image_max_height' => 8000,
+    'image_max_pixels' => 25000000,
 ];
 $defaultRealtime = [
-    'mode' => 'auto',
+    'mode' => 'poll',
+    'sse_enabled' => false,
+    'poll_per_user_concurrency' => 1,
+    'poll_per_ip_concurrency' => 4,
     'sse_retry_ms' => 2000,
     'sse_heartbeat_seconds' => 20,
     'sse_max_seconds' => 55,
+    'sse_poll_active_ms' => 300,
+    'sse_poll_min_ms' => 1000,
+    'sse_poll_max_ms' => 5000,
+    'sse_poll_jitter_ms' => 150,
+    'sse_receipt_poll_ms' => 2000,
+    'stream_message_limit' => 60,
+    'stream_receipt_limit' => 80,
+    'stream_hydrate_max_messages' => 40,
+];
+$defaultPresence = [
+    'online_window_seconds' => 60,
+    'ping_interval_seconds' => 15,
+    'last_seen_touch_seconds' => 60,
+];
+$defaultReactions = [
+    'cooldown_seconds' => 2,
+    'rate_limit' => [
+        'max_attempts' => 12,
+        'window_minutes' => 1,
+        'lock_minutes' => 1,
+        'ttl_hours' => 6,
+    ],
+];
+$defaultRateLimits = [
+    'max_body_bytes' => [
+        'register' => 16 * 1024,
+        'login' => 16 * 1024,
+        'send' => 256 * 1024,
+        'ack' => 128 * 1024,
+        'upload' => 30 * 1024 * 1024,
+        'conversation_start' => 8 * 1024,
+        'group_create' => 64 * 1024,
+        'group_update' => 64 * 1024,
+        'group_join' => 16 * 1024,
+        'group_invite' => 16 * 1024,
+        'group_remove_member' => 4 * 1024,
+        'me_update' => 24 * 1024,
+        'me_settings' => 8 * 1024,
+        'mark_read' => 16 * 1024,
+        'delete_for_me' => 8 * 1024,
+        'delete_for_everyone' => 8 * 1024,
+        'react' => 8 * 1024,
+        'profile_photo_upload' => 8 * 1024 * 1024,
+        'profile_photo_set_active' => 8 * 1024,
+        'profile_photo_delete' => 4 * 1024,
+    ],
+    'max_array_items' => [
+        'send_media_ids' => 20,
+        'ack_message_ids' => 500,
+    ],
+    'endpoints' => [
+        'ttl_hours' => 24,
+        'default' => [
+            'ip_burst' => 60,
+            'user_burst' => 40,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 15,
+            'max_ban_seconds' => 900,
+            'max_penalty_level' => 8,
+        ],
+        'register' => [
+            'ip_burst' => 12,
+            'user_burst' => 12,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 60,
+            'max_ban_seconds' => 3600,
+            'max_penalty_level' => 10,
+        ],
+        'login' => [
+            'ip_burst' => 30,
+            'user_burst' => 30,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 30,
+            'max_ban_seconds' => 1800,
+            'max_penalty_level' => 9,
+        ],
+        'upload' => [
+            'ip_burst' => 15,
+            'user_burst' => 10,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 30,
+            'max_ban_seconds' => 1800,
+            'max_penalty_level' => 9,
+        ],
+        'send' => [
+            'ip_burst' => 120,
+            'user_burst' => 80,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 10,
+            'max_ban_seconds' => 600,
+            'max_penalty_level' => 8,
+        ],
+        'ack' => [
+            'ip_burst' => 200,
+            'user_burst' => 160,
+            'window_seconds' => 60,
+            'base_ban_seconds' => 5,
+            'max_ban_seconds' => 300,
+            'max_penalty_level' => 7,
+        ],
+    ],
+];
+$defaultGroups = [
+    'invite_token_ttl_seconds' => 900,
 ];
 $defaultLogging = [
     'level' => 'INFO',
@@ -390,6 +519,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'video_max_size' => parseUploadMb('upload_video_max_size', $defaultUploads['video_max_size'], $errors, 'حداکثر حجم ویدیو'),
                 'voice_max_size' => parseUploadMb('upload_voice_max_size', $defaultUploads['voice_max_size'], $errors, 'حداکثر حجم ویس'),
                 'file_max_size' => parseUploadMb('upload_file_max_size', $defaultUploads['file_max_size'], $errors, 'حداکثر حجم فایل'),
+                'user_total_quota_bytes' => $defaultUploads['user_total_quota_bytes'],
+                'user_daily_quota_bytes' => $defaultUploads['user_daily_quota_bytes'],
+                'app_total_quota_bytes' => $defaultUploads['app_total_quota_bytes'],
+                'app_total_files_limit' => $defaultUploads['app_total_files_limit'],
+                'pending_ttl_seconds' => $defaultUploads['pending_ttl_seconds'],
+                'gc_max_items' => $defaultUploads['gc_max_items'],
+                'max_files_per_request' => $defaultUploads['max_files_per_request'],
+                'max_photos_per_request' => $defaultUploads['max_photos_per_request'],
+                'max_videos_per_request' => $defaultUploads['max_videos_per_request'],
+                'thumbnail_max_size' => $defaultUploads['thumbnail_max_size'],
+                'image_max_width' => $defaultUploads['image_max_width'],
+                'image_max_height' => $defaultUploads['image_max_height'],
+                'image_max_pixels' => $defaultUploads['image_max_pixels'],
                 'ffmpeg_path' => '/usr/bin/ffmpeg',
                 'ffprobe_path' => '/usr/bin/ffprobe',
                 'shared_mode' => false,
@@ -410,11 +552,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'timezone' => 'Asia/Tehran',
                         'jwt_secret' => $jwtSecret,
                         'jwt_ttl_seconds' => $jwtTtlSeconds,
+                        'refresh_ttl_seconds' => 60 * 60 * 24 * 30,
                         'enable_service_worker' => true,
                     ],
                     'db' => $db,
                     'uploads' => $uploads,
                     'realtime' => $defaultRealtime,
+                    'presence' => $defaultPresence,
+                    'reactions' => $defaultReactions,
+                    'rate_limits' => $defaultRateLimits,
+                    'groups' => $defaultGroups,
                     'logging' => $defaultLogging,
                     'filesystem' => $defaultFilesystem,
                 ];

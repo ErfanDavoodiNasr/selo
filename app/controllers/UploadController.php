@@ -11,6 +11,7 @@ use App\Core\ImageSafety;
 use App\Core\RateLimiter;
 use App\Core\Request;
 use App\Core\Filesystem;
+use App\Core\QuotaExceededException;
 
 class UploadController
 {
@@ -65,8 +66,6 @@ class UploadController
         }
 
         $items = [];
-        $incomingBytes = self::sumIncomingBytes($files);
-        MediaLifecycleService::enforceUploadQuotas($config, (int)$user['id'], $incomingBytes, count($files));
         foreach ($files as $index => $file) {
             if ($file['error'] !== UPLOAD_ERR_OK) {
                 Logger::warn('upload_failed', ['reason' => 'upload_error', 'code' => $file['error']], 'upload');
@@ -174,6 +173,7 @@ class UploadController
             $mediaId = 0;
             try {
                 $pdo->beginTransaction();
+                MediaLifecycleService::reserveUploadQuota($config, (int)$user['id'], (int)$file['size'], 1);
                 $now = date('Y-m-d H:i:s');
                 $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'media_files (user_id, type, file_name, original_name, mime_type, size_bytes, duration, width, height, thumbnail_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
                 $insert->execute([
@@ -192,6 +192,20 @@ class UploadController
                 $mediaId = (int)$pdo->lastInsertId();
                 MediaLifecycleService::markPending($config, $mediaId);
                 $pdo->commit();
+            } catch (QuotaExceededException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                if (is_file($destination)) {
+                    @unlink($destination);
+                }
+                if ($thumbnailName !== null) {
+                    $thumbPath = rtrim($mediaDir, '/') . '/' . $thumbnailName;
+                    if (is_file($thumbPath)) {
+                        @unlink($thumbPath);
+                    }
+                }
+                Response::json(['ok' => false, 'error' => $e->getMessage()], $e->statusCode());
             } catch (\Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();

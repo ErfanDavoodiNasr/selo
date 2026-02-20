@@ -7,12 +7,15 @@ use App\Core\UploadPaths;
 use App\Core\Response;
 use App\Core\ImageSafety;
 use App\Core\Filesystem;
+use App\Core\RateLimiter;
+use App\Core\Request;
 
 class ProfileController
 {
     public static function uploadPhoto(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'profile_photo_upload', (int)$user['id']);
         if (!isset($_FILES['photo'])) {
             Response::json(['ok' => false, 'error' => 'فایل ارسال نشده است.'], 422);
         }
@@ -97,6 +100,7 @@ class ProfileController
     public static function setActive(array $config): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'profile_photo_set_active', (int)$user['id']);
         $data = json_decode(file_get_contents('php://input'), true) ?: [];
         $photoId = (int)($data['photo_id'] ?? 0);
         if ($photoId <= 0) {
@@ -109,6 +113,7 @@ class ProfileController
     public static function deletePhoto(array $config, int $photoId): void
     {
         $user = Auth::requireUser($config);
+        self::guardWrite($config, 'profile_photo_delete', (int)$user['id']);
         if ($photoId <= 0) {
             Response::json(['ok' => false, 'error' => 'شناسه عکس نامعتبر است.'], 422);
         }
@@ -205,5 +210,25 @@ class ProfileController
         imagedestroy($image);
 
         return $thumbName;
+    }
+
+    private static function guardWrite(array $config, string $endpoint, int $userId): void
+    {
+        self::enforceBodyLimit($config, $endpoint);
+        if (RateLimiter::endpointIsLimited($config, $endpoint, $userId)) {
+            Response::json(['ok' => false, 'error' => 'درخواست‌ها بیش از حد مجاز است. کمی بعد تلاش کنید.'], 429);
+        }
+        RateLimiter::hitEndpoint($config, $endpoint, $userId);
+    }
+
+    private static function enforceBodyLimit(array $config, string $endpoint): void
+    {
+        $max = (int)($config['rate_limits']['max_body_bytes'][$endpoint] ?? 0);
+        if ($max <= 0) {
+            return;
+        }
+        if (Request::contentLength() > $max) {
+            Response::json(['ok' => false, 'error' => 'حجم درخواست بیش از حد مجاز است.'], 413);
+        }
     }
 }

@@ -248,6 +248,8 @@
     profilePhotoDelete: (id) => `/api/profile/photo/${id}`
   };
   const allowedReactions = ['😂', '😜', '👍', '😘', '😁', '🤣', '😍', '🥰', '🤩', '😐', '😑', '🙄', '😬', '🤮', '😎', '🥳', '👎', '🙏'];
+  const conversationsPageSize = 80;
+  const conversationsRefreshMs = 60000;
 
   const realtimeConfig = (() => {
     const cfg = window.SELO_CONFIG?.realtime || {};
@@ -2513,8 +2515,9 @@
     setActiveChatItem(state.currentConversation);
   }
 
-  async function loadConversations() {
-    const res = await apiFetch(API.conversations);
+  async function loadConversations(limit = conversationsPageSize) {
+    const pageSize = Math.max(20, Math.min(200, Number(limit) || conversationsPageSize));
+    const res = await apiFetch(`${API.conversations}?limit=${pageSize}`);
     if (res.data.ok) {
       state.conversations = res.data.data;
       if (state.currentConversation) {
@@ -4097,11 +4100,11 @@
       updateNetworkStatus();
       if (!conversationsAutoRefreshTimer) {
         conversationsAutoRefreshTimer = setInterval(() => {
-      if (state.token) {
-        loadConversations();
+          if (state.token && !document.hidden) {
+            loadConversations();
+          }
+        }, conversationsRefreshMs);
       }
-    }, 20000);
-  }
     } catch (err) {
       state.token = null;
       stopRealtime();

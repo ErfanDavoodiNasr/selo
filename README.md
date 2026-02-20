@@ -59,6 +59,10 @@ If your cPanel has no terminal/SSH:
 - If installed in root: `https://yourdomain.com/install` (or `https://yourdomain.com/install.php` if `/install` is blocked)
 - If in subfolder: `https://yourdomain.com/selo/install` (or `https://yourdomain.com/selo/install.php` if `/install` is blocked)
 
+Installer is locked by default for non-local IPs.
+- Preferred: set env var `SELO_INSTALL_TOKEN` and open installer with `?install_token=...` (or `X-Install-Token` header).
+- Alternative: create file `storage/.install_unlock` before first run; it is removed automatically after successful install.
+
 Installer steps:
 1. Requirements check
 2. Database connection
@@ -78,6 +82,11 @@ Installer steps:
 - Change JWT secret: `app.jwt_secret` (changing it logs everyone out)
 - Upload limits: `uploads.*`
 - Filesystem permission policy (runtime): `filesystem.dir_mode`, `filesystem.file_mode`, `filesystem.umask`
+
+## Upgrade / Migration
+- Runtime schema auto-create has been removed from request paths.
+- Before upgrading code, apply schema updates from `database/schema.sql` (same DB prefix as your install).
+- If schema is incomplete, APIs now return a clear migration-required error instead of trying runtime DDL.
 
 ### Offline Compliance Check
 - Run: `php scripts/check-offline-compliance.php`

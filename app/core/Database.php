@@ -7,6 +7,7 @@ use PDOException;
 class Database
 {
     private static $pdo;
+    private static $tableExistsCache = [];
 
     public static function init(array $config): void
     {
@@ -36,5 +37,25 @@ class Database
     public static function pdo(): ?PDO
     {
         return self::$pdo;
+    }
+
+    public static function tableExists(string $tableName): bool
+    {
+        if ($tableName === '') {
+            return false;
+        }
+        if (array_key_exists($tableName, self::$tableExistsCache)) {
+            return self::$tableExistsCache[$tableName];
+        }
+        $pdo = self::pdo();
+        if (!$pdo) {
+            return false;
+        }
+        $sql = 'SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$tableName]);
+        $exists = (bool)$stmt->fetchColumn();
+        self::$tableExistsCache[$tableName] = $exists;
+        return $exists;
     }
 }

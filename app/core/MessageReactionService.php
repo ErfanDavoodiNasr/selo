@@ -94,30 +94,49 @@ class MessageReactionService
         $counts = $countStmt->fetchAll();
 
         $result = [];
-        foreach ($counts as $row) {
-            $emoji = $row['reaction_emoji'];
-            $userSql = 'SELECT u.id, u.full_name, u.username, up.id AS photo_id
-                FROM ' . $config['db']['prefix'] . 'message_reactions mr
-                JOIN ' . $config['db']['prefix'] . 'users u ON u.id = mr.user_id
-                LEFT JOIN ' . $config['db']['prefix'] . 'user_profile_photos up ON up.id = u.active_photo_id
-                WHERE mr.message_id = ? AND mr.reaction_emoji = ?
-                ORDER BY mr.created_at DESC
-                LIMIT ' . $limit;
-            $userStmt = $pdo->prepare($userSql);
-            $userStmt->execute([$messageId, $emoji]);
-            $users = $userStmt->fetchAll();
-            foreach ($users as &$user) {
-                $user['id'] = (int)$user['id'];
-                if ($user['photo_id'] !== null) {
-                    $user['photo_id'] = (int)$user['photo_id'];
+        if ($emojiFilter === null || $emojiFilter === '') {
+            foreach ($counts as $row) {
+                $result[] = [
+                    'emoji' => $row['reaction_emoji'],
+                    'count' => (int)$row['cnt'],
+                    'users' => [],
+                    'total' => (int)$row['cnt'],
+                ];
+            }
+        } else {
+            $usersByEmoji = [];
+            if (!empty($counts)) {
+                $userSql = 'SELECT mr.reaction_emoji, u.id, u.full_name, u.username, up.id AS photo_id
+                    FROM ' . $config['db']['prefix'] . 'message_reactions mr
+                    JOIN ' . $config['db']['prefix'] . 'users u ON u.id = mr.user_id
+                    LEFT JOIN ' . $config['db']['prefix'] . 'user_profile_photos up ON up.id = u.active_photo_id
+                    WHERE mr.message_id = ? AND mr.reaction_emoji = ?
+                    ORDER BY mr.created_at DESC
+                    LIMIT ' . $limit;
+                $userStmt = $pdo->prepare($userSql);
+                $userStmt->execute([$messageId, $emojiFilter]);
+                foreach ($userStmt->fetchAll() as $user) {
+                    $emoji = (string)$user['reaction_emoji'];
+                    if (!isset($usersByEmoji[$emoji])) {
+                        $usersByEmoji[$emoji] = [];
+                    }
+                    $usersByEmoji[$emoji][] = [
+                        'id' => (int)$user['id'],
+                        'full_name' => $user['full_name'],
+                        'username' => $user['username'],
+                        'photo_id' => $user['photo_id'] !== null ? (int)$user['photo_id'] : null,
+                    ];
                 }
             }
-            $result[] = [
-                'emoji' => $emoji,
-                'count' => (int)$row['cnt'],
-                'users' => $users,
-                'total' => (int)$row['cnt'],
-            ];
+            foreach ($counts as $row) {
+                $emoji = (string)$row['reaction_emoji'];
+                $result[] = [
+                    'emoji' => $emoji,
+                    'count' => (int)$row['cnt'],
+                    'users' => $usersByEmoji[$emoji] ?? [],
+                    'total' => (int)$row['cnt'],
+                ];
+            }
         }
 
         $current = null;

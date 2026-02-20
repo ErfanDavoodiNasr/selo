@@ -3,10 +3,33 @@ require __DIR__ . '/../app/bootstrap.php';
 
 function serveLocalPublicFile(string $relativePath): bool
 {
-    $cleanPath = ltrim($relativePath, '/');
-    $absolutePath = __DIR__ . '/' . $cleanPath;
-    if (!is_file($absolutePath)) {
+    $cleanPath = ltrim(rawurldecode($relativePath), '/');
+    if ($cleanPath === '' || strpos($cleanPath, '..') !== false || strpos($cleanPath, '\\') !== false) {
         return false;
+    }
+    $allowedExact = ['sw.js', 'favicon.ico'];
+    $isAssetPath = (bool)preg_match('#^assets/[A-Za-z0-9/_\.\-]+$#', $cleanPath);
+    if (!$isAssetPath && !in_array($cleanPath, $allowedExact, true)) {
+        return false;
+    }
+
+    $absolutePath = realpath(__DIR__ . '/' . $cleanPath);
+    if ($absolutePath === false || !is_file($absolutePath)) {
+        return false;
+    }
+    if ($isAssetPath) {
+        $assetsRoot = realpath(__DIR__ . '/assets');
+        if ($assetsRoot === false || strpos($absolutePath, $assetsRoot . DIRECTORY_SEPARATOR) !== 0) {
+            return false;
+        }
+    } else {
+        $allowedRoots = [
+            realpath(__DIR__ . '/sw.js'),
+            realpath(__DIR__ . '/favicon.ico'),
+        ];
+        if (!in_array($absolutePath, array_filter($allowedRoots), true)) {
+            return false;
+        }
     }
 
     $ext = strtolower(pathinfo($absolutePath, PATHINFO_EXTENSION));
@@ -27,7 +50,10 @@ function serveLocalPublicFile(string $relativePath): bool
         'map' => 'application/json; charset=UTF-8',
         'webmanifest' => 'application/manifest+json; charset=UTF-8',
     ];
-    header('Content-Type: ' . ($map[$ext] ?? 'application/octet-stream'));
+    if (!isset($map[$ext])) {
+        return false;
+    }
+    header('Content-Type: ' . $map[$ext]);
     header('X-Content-Type-Options: nosniff');
     if ($cleanPath === 'sw.js') {
         header('Cache-Control: no-cache, no-store, must-revalidate');

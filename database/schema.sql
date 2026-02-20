@@ -74,6 +74,17 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}media_upload_state` (
   CONSTRAINT `fk_media_state_media` FOREIGN KEY (`media_id`) REFERENCES `{{prefix}}media_files` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `{{prefix}}media_usage` (
+  `user_id` INT UNSIGNED NOT NULL,
+  `total_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `total_files` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `daily_bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `daily_date` DATE NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`user_id`),
+  KEY `idx_daily_date` (`daily_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `{{prefix}}conversations` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `user_one_id` INT UNSIGNED NOT NULL,
@@ -143,7 +154,8 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   `is_deleted_for_all` TINYINT(1) NOT NULL DEFAULT 0,
   `created_at` DATETIME NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uniq_message_client` (`sender_id`, `client_id`),
+  UNIQUE KEY `uniq_msg_client_conv` (`sender_id`, `client_id`, `conversation_id`),
+  UNIQUE KEY `uniq_msg_client_group` (`sender_id`, `client_id`, `group_id`),
   KEY `idx_conversation` (`conversation_id`),
   KEY `idx_group` (`group_id`),
   KEY `idx_group_created` (`group_id`, `created_at`),

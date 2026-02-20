@@ -10,6 +10,7 @@ use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
 use App\Core\Filesystem;
+use App\Core\LogContext;
 
 class StreamController
 {
@@ -35,7 +36,7 @@ class StreamController
         }
         PresenceService::ping($config, (int)$user['id']);
 
-        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $ip = LogContext::getIp() ?: 'unknown';
         $userId = (int)$user['id'];
         $perUserLimit = max(1, min(4, (int)($config['realtime']['poll_per_user_concurrency'] ?? 1)));
         $perIpLimit = max(1, min(12, (int)($config['realtime']['poll_per_ip_concurrency'] ?? 4)));

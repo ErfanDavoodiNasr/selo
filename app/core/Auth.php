@@ -190,22 +190,10 @@ class Auth
         if (self::$revokedTableEnsured) {
             return;
         }
-        $pdo = Database::pdo();
-        if (!$pdo) {
-            return;
-        }
         $table = $config['db']['prefix'] . 'revoked_tokens';
-        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $table . '` (
-            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-            `jti` VARCHAR(64) NULL,
-            `token_hash` CHAR(64) NOT NULL,
-            `expires_at` DATETIME NOT NULL,
-            `revoked_at` DATETIME NOT NULL,
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_jti` (`jti`),
-            UNIQUE KEY `uniq_token_hash` (`token_hash`),
-            KEY `idx_expires_at` (`expires_at`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        if (!Database::tableExists($table)) {
+            Response::json(['ok' => false, 'error' => 'ساختار پایگاه‌داده ناقص است. لطفاً migration نصب را اجرا کنید.'], 500);
+        }
         self::$revokedTableEnsured = true;
     }
 
