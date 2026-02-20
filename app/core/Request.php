@@ -6,7 +6,17 @@ class Request
     public static function json(): array
     {
         $raw = file_get_contents('php://input');
+        $trimmed = trim((string)$raw);
+        if ($trimmed === '') {
+            return [];
+        }
         $data = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            if (LogContext::isApi()) {
+                Response::json(['ok' => false, 'error' => 'بدنه JSON نامعتبر است.'], 400);
+            }
+            return [];
+        }
         return is_array($data) ? $data : [];
     }
 

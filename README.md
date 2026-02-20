@@ -40,6 +40,16 @@ SELO is a Telegram‑like messenger for shared hosting. It supports private chat
   - `storage/uploads/media/`
   - `storage/logs/`
 
+Automatic fix (recommended after each upload/extract):
+- `bash scripts/fix-permissions.sh`
+- Optional owner/group on VPS: `bash scripts/fix-permissions.sh /home/USER/public_html/selo www-data www-data`
+
+If your cPanel has no terminal/SSH:
+1. In File Manager create: `storage/.permfix.key` and put a long random string in it.
+2. Open in browser: `https://yourdomain.com/fix-permissions.php?key=YOUR_STRING`
+3. After success, delete `storage/.permfix.key`.
+4. (Optional, recommended) delete `public/fix-permissions.php` too.
+
 ### 5) Create database
 - cPanel → **MySQL Databases**
 - Create DB + user, assign **ALL privileges**
@@ -67,6 +77,7 @@ Installer steps:
 - Change URL: `app.url`
 - Change JWT secret: `app.jwt_secret` (changing it logs everyone out)
 - Upload limits: `uploads.*`
+- Filesystem permission policy (runtime): `filesystem.dir_mode`, `filesystem.file_mode`, `filesystem.umask`
 
 ### Offline Compliance Check
 - Run: `php scripts/check-offline-compliance.php`

@@ -147,4 +147,9 @@ return [
         'max_size_mb' => 10,
         'max_files' => 5,
     ],
+    'filesystem' => [
+        'dir_mode' => 0775,
+        'file_mode' => 0664,
+        'umask' => 0002,
+    ],
 ];

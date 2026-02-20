@@ -9,6 +9,7 @@ use App\Core\MessageReceiptService;
 use App\Core\MessageReactionService;
 use App\Core\Request;
 use App\Core\Response;
+use App\Core\Filesystem;
 
 class StreamController
 {
@@ -92,8 +93,8 @@ class StreamController
     private static function acquireConcurrencyLock(string $scope, string $id, int $limit): ?array
     {
         $dir = rtrim(sys_get_temp_dir(), '/\\') . '/selo-realtime-locks';
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0770, true);
+        if (!Filesystem::ensureDir($dir)) {
+            return null;
         }
         $key = sha1($scope . ':' . $id);
         for ($slot = 0; $slot < $limit; $slot++) {

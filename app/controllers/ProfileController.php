@@ -6,6 +6,7 @@ use App\Core\Database;
 use App\Core\UploadPaths;
 use App\Core\Response;
 use App\Core\ImageSafety;
+use App\Core\Filesystem;
 
 class ProfileController
 {
@@ -46,13 +47,14 @@ class ProfileController
         $ext = $allowed[$realMime];
         $filename = bin2hex(random_bytes(16)) . '.' . $ext;
         $uploadDir = rtrim(UploadPaths::baseDir($config), '/');
-        if (!is_dir($uploadDir)) {
-            @mkdir($uploadDir, 0755, true);
+        if (!Filesystem::ensureDir($uploadDir)) {
+            Response::json(['ok' => false, 'error' => 'مسیر آپلود قابل نوشتن نیست.'], 500);
         }
         $destination = $uploadDir . '/' . $filename;
         if (!move_uploaded_file($file['tmp_name'], $destination)) {
             Response::json(['ok' => false, 'error' => 'ذخیره فایل ممکن نیست.'], 500);
         }
+        Filesystem::ensureWritableFile($destination);
 
         $savedCheck = ImageSafety::validateForDecode($destination, $uploadsCfg);
         if (!$savedCheck['ok']) {
@@ -197,6 +199,7 @@ class ProfileController
         $thumbName = 'profile_' . bin2hex(random_bytes(8)) . '.jpg';
         $thumbPath = rtrim($uploadDir, '/') . '/' . $thumbName;
         imagejpeg($thumb, $thumbPath, 85);
+        Filesystem::ensureWritableFile($thumbPath);
 
         imagedestroy($thumb);
         imagedestroy($image);

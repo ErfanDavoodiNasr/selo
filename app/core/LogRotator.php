@@ -6,8 +6,8 @@ class LogRotator
     public static function append(string $path, string $line, int $maxBytes, int $maxFiles): void
     {
         $dir = dirname($path);
-        if (!is_dir($dir)) {
-            @mkdir($dir, 0775, true);
+        if (!Filesystem::ensureDir($dir)) {
+            return;
         }
 
         $lockPath = $path . '.lock';
@@ -31,6 +31,7 @@ class LogRotator
                 flock($fh, LOCK_UN);
             }
             fclose($fh);
+            Filesystem::ensureWritableFile($path);
         }
 
         flock($lock, LOCK_UN);

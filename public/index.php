@@ -1,6 +1,44 @@
 <?php
 require __DIR__ . '/../app/bootstrap.php';
 
+function serveLocalPublicFile(string $relativePath): bool
+{
+    $cleanPath = ltrim($relativePath, '/');
+    $absolutePath = __DIR__ . '/' . $cleanPath;
+    if (!is_file($absolutePath)) {
+        return false;
+    }
+
+    $ext = strtolower(pathinfo($absolutePath, PATHINFO_EXTENSION));
+    $map = [
+        'css' => 'text/css; charset=UTF-8',
+        'js' => 'application/javascript; charset=UTF-8',
+        'svg' => 'image/svg+xml',
+        'png' => 'image/png',
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
+        'woff' => 'font/woff',
+        'woff2' => 'font/woff2',
+        'ttf' => 'font/ttf',
+        'eot' => 'application/vnd.ms-fontobject',
+        'map' => 'application/json; charset=UTF-8',
+        'webmanifest' => 'application/manifest+json; charset=UTF-8',
+    ];
+    header('Content-Type: ' . ($map[$ext] ?? 'application/octet-stream'));
+    header('X-Content-Type-Options: nosniff');
+    if ($cleanPath === 'sw.js') {
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+    } else {
+        header('Cache-Control: public, max-age=31536000, immutable');
+    }
+    header('Content-Length: ' . filesize($absolutePath));
+    readfile($absolutePath);
+    exit;
+}
+
 function installerUrl(): string
 {
     $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
@@ -9,14 +47,19 @@ function installerUrl(): string
         $basePath = '';
     }
     $docRoot = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+    $prefix = $basePath === '' ? '' : $basePath;
     if ($docRoot !== '') {
-        $basePathDisk = $docRoot . ($basePath === '' ? '' : $basePath);
+        $basePathDisk = $docRoot . $prefix;
+        $installDir = $basePathDisk . '/install';
+        if (is_dir($installDir)) {
+            return $prefix . '/install/';
+        }
         $installFile = $basePathDisk . '/install.php';
         if (is_file($installFile)) {
-            return ($basePath === '' ? '' : $basePath) . '/install.php';
+            return $prefix . '/install.php';
         }
     }
-    return ($basePath === '' ? '' : $basePath) . '/install/';
+    return $prefix . '/install/';
 }
 
 function assetUrl(string $basePath, string $relativePath): string
@@ -107,6 +150,44 @@ function buildCspHeader(array $config, string $nonce): string
     return implode('; ', $directives);
 }
 
+$path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+$basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '')), '/');
+if ($basePath === '/') {
+    $basePath = '';
+}
+$relativePath = is_string($path) ? $path : '/';
+if ($basePath !== '' && strpos($relativePath, $basePath . '/') === 0) {
+    $relativePath = substr($relativePath, strlen($basePath));
+}
+if ($relativePath === '') {
+    $relativePath = '/';
+}
+
+if (strpos($relativePath, '/assets/') === 0) {
+    if (!serveLocalPublicFile($relativePath)) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Not Found';
+        exit;
+    }
+}
+if ($relativePath === '/sw.js') {
+    if (!serveLocalPublicFile('sw.js')) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Not Found';
+        exit;
+    }
+}
+if ($relativePath === '/favicon.ico') {
+    if (!serveLocalPublicFile('favicon.ico')) {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo 'Not Found';
+        exit;
+    }
+}
+
 $configFile = __DIR__ . '/../config/config.php';
 if (!file_exists($configFile)) {
     header('Location: ' . installerUrl());
@@ -120,20 +201,8 @@ if (empty($config['installed'])) {
 $realtimeModeRaw = strtolower(trim((string)($config['realtime']['mode'] ?? 'auto')));
 $realtimeMode = in_array($realtimeModeRaw, ['auto', 'sse', 'poll'], true) ? $realtimeModeRaw : 'auto';
 
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$basePath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
-if ($basePath === '/') {
-    $basePath = '';
-}
-$relativePath = $path;
-if ($basePath !== '' && strpos($relativePath, $basePath . '/') === 0) {
-    $relativePath = substr($relativePath, strlen($basePath));
-}
-if ($relativePath === '') {
-    $relativePath = '/';
-}
 $apiPrefix = $basePath !== '' ? ($basePath . '/api/') : '/api/';
-if (strpos($path, $apiPrefix) === 0) {
+if (is_string($path) && strpos($path, $apiPrefix) === 0) {
     App\Core\LogContext::setIsApi(true);
     App\Core\Logger::info('request_start', [], 'api');
     $path = $relativePath;
@@ -152,6 +221,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SELO (سلو)</title>
+    <link rel="icon" href="<?php echo htmlspecialchars(assetUrl($basePath, 'favicon.ico'), ENT_QUOTES, 'UTF-8'); ?>" sizes="any">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/fonts.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/app.css'), ENT_QUOTES, 'UTF-8'); ?>">

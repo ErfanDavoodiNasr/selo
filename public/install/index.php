@@ -42,10 +42,12 @@ function installLog(string $message): void
     global $installLogFile;
     $dir = dirname($installLogFile);
     if (!is_dir($dir)) {
-        @mkdir($dir, 0755, true);
+        @mkdir($dir, 0775, true);
+        @chmod($dir, 0775);
     }
     $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL;
     @file_put_contents($installLogFile, $line, FILE_APPEND);
+    @chmod($installLogFile, 0664);
 }
 
 function isValidIp(string $ip): bool
@@ -89,10 +91,8 @@ function enforceInstallerAccess(): void
 
     $requiredToken = trim((string)getenv('SELO_INSTALL_TOKEN'));
     if ($requiredToken === '') {
-        installLog('installer_access_denied ip=' . $ip . ' reason=missing_token_and_ip_not_allowed');
-        http_response_code(403);
-        echo 'Installer access denied.';
-        exit;
+        // Default shared-hosting behavior: allow installer when no token policy is configured.
+        return;
     }
 
     if (is_file($installTokenUsedFile)) {
@@ -260,6 +260,11 @@ $defaultLogging = [
     'max_size_mb' => 10,
     'max_files' => 5,
 ];
+$defaultFilesystem = [
+    'dir_mode' => 0775,
+    'file_mode' => 0664,
+    'umask' => 0002,
+];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!checkCsrf()) {
@@ -411,17 +416,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'uploads' => $uploads,
                     'realtime' => $defaultRealtime,
                     'logging' => $defaultLogging,
+                    'filesystem' => $defaultFilesystem,
                 ];
 
                 $export = "<?php\nreturn " . var_export($config, true) . ";\n";
                 $configDir = $basePath . '/config';
-                if (!is_dir($configDir) && !mkdir($configDir, 0755, true) && !is_dir($configDir)) {
+                if (!is_dir($configDir) && !mkdir($configDir, 0775, true) && !is_dir($configDir)) {
                     installLog('config_write_failed step=4 reason=create_config_dir_failed path=' . $configDir);
                     $errors[] = 'ایجاد پوشه config ناموفق بود. سطح دسترسی مسیر را بررسی کنید.';
                 } elseif (!is_writable($configDir)) {
                     installLog('config_write_failed step=4 reason=config_dir_not_writable path=' . $configDir);
                     $errors[] = 'پوشه config قابل‌نوشتن نیست. سطح دسترسی مسیر را بررسی کنید.';
                 } else {
+                    @chmod($configDir, 0775);
                     $tmpConfigFile = $configFile . '.tmp.' . str_replace('.', '', uniqid('', true));
                     $bytesWritten = @file_put_contents($tmpConfigFile, $export, LOCK_EX);
                     if ($bytesWritten === false || $bytesWritten !== strlen($export)) {
@@ -437,6 +444,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         installLog('config_write_failed step=4 reason=rename_failed path=' . $configFile);
                         $errors[] = 'ذخیره نهایی تنظیمات ناموفق بود. سطح دسترسی فایل/مسیر config را بررسی کنید.';
                     } else {
+                        @chmod($configFile, 0664);
                         $requestIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
                         if (!isValidIp($requestIp)) {
                             $requestIp = '-';

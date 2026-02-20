@@ -10,6 +10,7 @@ use App\Core\Logger;
 use App\Core\ImageSafety;
 use App\Core\RateLimiter;
 use App\Core\Request;
+use App\Core\Filesystem;
 
 class UploadController
 {
@@ -58,10 +59,7 @@ class UploadController
         $maxVideos = (int)($uploadsCfg['max_videos_per_request'] ?? self::DEFAULT_MAX_FILES);
 
         $mediaDir = UploadPaths::mediaDir($config);
-        if (!is_dir($mediaDir)) {
-            @mkdir($mediaDir, 0755, true);
-        }
-        if (!is_dir($mediaDir) || !is_writable($mediaDir)) {
+        if (!Filesystem::ensureDir($mediaDir)) {
             Logger::error('upload_failed', ['reason' => 'media_dir_not_writable'], 'upload');
             Response::json(['ok' => false, 'error' => 'مسیر آپلود قابل نوشتن نیست.'], 500);
         }
@@ -141,6 +139,7 @@ class UploadController
                 Logger::error('upload_failed', ['reason' => 'move_failed', 'type' => $detectedType], 'upload');
                 Response::json(['ok' => false, 'error' => 'ذخیره فایل ممکن نیست.'], 500);
             }
+            Filesystem::ensureWritableFile($destination);
 
             $width = null;
             $height = null;

@@ -326,7 +326,7 @@ class RateLimiter
                 penalty_level = IF(
                     IF(last_attempt_at < (NOW() - INTERVAL ? SECOND), 1, attempts + 1) >= ?,
                     LEAST(penalty_level + 1, ?),
-                    GREATEST(penalty_level - 1, 0)
+                    IF(penalty_level > 0, penalty_level - 1, 0)
                 ),
                 lock_until = IF(
                     IF(last_attempt_at < (NOW() - INTERVAL ? SECOND), 1, attempts + 1) >= ?,

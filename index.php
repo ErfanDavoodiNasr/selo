@@ -22,6 +22,7 @@ function servePublicAsset(string $path): void
         'jpeg' => 'image/jpeg',
         'gif' => 'image/gif',
         'webp' => 'image/webp',
+        'ico' => 'image/x-icon',
         'woff' => 'font/woff',
         'woff2' => 'font/woff2',
         'ttf' => 'font/ttf',
@@ -68,6 +69,9 @@ if (strpos($relativePath, '/assets/') === 0) {
 }
 if ($relativePath === '/sw.js') {
     servePublicAsset('sw.js');
+}
+if ($relativePath === '/favicon.ico') {
+    servePublicAsset('favicon.ico');
 }
 
 require __DIR__ . '/public/index.php';
