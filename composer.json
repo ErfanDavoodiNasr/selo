@@ -1,0 +1,25 @@
+{
+    "name": "selo/messenger",
+    "description": "SELO shared-hosting PHP messenger",
+    "license": "proprietary",
+    "type": "project",
+    "require": {
+        "php": "^8.2",
+        "illuminate/filesystem": "^12.0",
+        "illuminate/support": "^12.0",
+        "illuminate/translation": "^12.0",
+        "illuminate/validation": "^12.0"
+    },
+    "autoload": {
+        "classmap": [
+            "app/core",
+            "app/controllers"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
