@@ -229,10 +229,7 @@ $realtimeMode = in_array($realtimeModeRaw, ['auto', 'sse', 'poll'], true) ? $rea
 
 $apiPrefix = $basePath !== '' ? ($basePath . '/api/') : '/api/';
 if (is_string($path) && strpos($path, $apiPrefix) === 0) {
-    App\Core\LogContext::setIsApi(true);
-    App\Core\Logger::info('request_start', [], 'api');
-    $path = $relativePath;
-    require __DIR__ . '/../app/routes.php';
+    App\Core\HttpKernel::handleApi($config, $relativePath);
     exit;
 }
 
@@ -249,8 +246,8 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
     <title>SELO (سلو)</title>
     <link rel="icon" href="<?php echo htmlspecialchars(assetUrl($basePath, 'favicon.ico'), ENT_QUOTES, 'UTF-8'); ?>" sizes="any">
     <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/fonts.css'), ENT_QUOTES, 'UTF-8'); ?>">
-    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
-    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/css/app.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/build/style.css'), ENT_QUOTES, 'UTF-8'); ?>">
+    <link rel="stylesheet" href="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/build/app.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body data-theme="light">
     <div id="app">
@@ -691,7 +688,7 @@ header('Content-Security-Policy: ' . buildCspHeader($config, $cspNonce));
             ?>
         };
     </script>
-    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/emoji-picker.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
-    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/app.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/build/emoji-picker.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+    <script src="<?php echo htmlspecialchars(assetUrl($basePath, 'assets/build/app.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

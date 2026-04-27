@@ -1,20 +1,36 @@
 <?php
-// Bootstrap for SELO (سلو)
+declare(strict_types=1);
 
 if (!defined('BASE_PATH')) {
     define('BASE_PATH', dirname(__DIR__));
 }
 
+if (PHP_VERSION_ID < 80200) {
+    http_response_code(500);
+    echo 'SELO requires PHP 8.2 or newer.';
+    exit;
+}
+
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
 
-mb_internal_encoding('UTF-8');
+if (function_exists('mb_internal_encoding')) {
+    mb_internal_encoding('UTF-8');
+}
+
+$composerAutoload = BASE_PATH . '/vendor/autoload.php';
+if (is_file($composerAutoload)) {
+    require_once $composerAutoload;
+}
 
 $configFile = BASE_PATH . '/config/config.php';
-$config = file_exists($configFile) ? require $configFile : null;
+$config = is_file($configFile) ? require $configFile : null;
+if ($config !== null && !is_array($config)) {
+    $config = null;
+}
 
-if ($config && isset($config['app']['timezone'])) {
-    date_default_timezone_set($config['app']['timezone']);
+if ($config && isset($config['app']['timezone']) && is_string($config['app']['timezone'])) {
+    @date_default_timezone_set($config['app']['timezone']);
 }
 
 spl_autoload_register(function ($class) {
@@ -26,17 +42,17 @@ spl_autoload_register(function ($class) {
     $relativeClass = substr($class, strlen($prefix));
     $relativePath = str_replace('\\', '/', $relativeClass);
     $file = $baseDir . $relativePath . '.php';
-    if (!file_exists($file)) {
+    if (!is_file($file)) {
         $parts = explode('/', $relativePath);
         if (count($parts) > 1) {
             $parts[0] = strtolower($parts[0]);
             $altFile = $baseDir . implode('/', $parts) . '.php';
-            if (file_exists($altFile)) {
+            if (is_file($altFile)) {
                 $file = $altFile;
             }
         }
     }
-    if (file_exists($file)) {
+    if (is_file($file)) {
         require $file;
     }
 });
@@ -46,6 +62,6 @@ App\Core\Filesystem::init($config ?? []);
 App\Core\Logger::init($config ?? []);
 App\Core\Logger::installErrorHandlers();
 
-if ($config) {
+if ($config && !defined('SELO_SKIP_DB_BOOTSTRAP')) {
     App\Core\Database::init($config);
 }

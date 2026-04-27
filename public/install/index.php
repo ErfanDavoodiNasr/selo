@@ -1,7 +1,25 @@
 <?php
-session_start();
+declare(strict_types=1);
+
+use App\Core\SchemaMigrator;
+use App\Core\Validator;
 
 $basePath = dirname(__DIR__, 2);
+if (!defined('SELO_SKIP_DB_BOOTSTRAP')) {
+    define('SELO_SKIP_DB_BOOTSTRAP', true);
+}
+require_once $basePath . '/app/bootstrap.php';
+
+$sessionSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || ((string)($_SERVER['SERVER_PORT'] ?? '') === '443');
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path' => '/',
+    'secure' => $sessionSecure,
+    'httponly' => true,
+    'samesite' => 'Lax',
+]);
+session_start();
+
 $configFile = $basePath . '/config/config.php';
 $installLogFile = $basePath . '/storage/logs/install.log';
 $installTokenUsedFile = $basePath . '/storage/install_token_used.flag';
@@ -141,9 +159,14 @@ function consumeInstallerToken(string $ip): void
 
 enforceInstallerAccess();
 
+$upgradeRequested = (($_GET['upgrade'] ?? '') === '1') || !empty($_SESSION['installer_upgrade']);
+if ($upgradeRequested) {
+    $_SESSION['installer_upgrade'] = true;
+}
+
 if (file_exists($configFile)) {
     $config = require $configFile;
-    if (!empty($config['installed'])) {
+    if (!empty($config['installed']) && !$upgradeRequested) {
         header('Location: ' . $appBasePath);
         exit;
     }
@@ -233,6 +256,21 @@ function parseDurationSeconds(string $valueKey, string $unitKey, int $defaultSec
         return $defaultSeconds;
     }
     return $seconds;
+}
+
+function normalizeAppUrl(string $rawUrl, string $defaultUrl, array &$errors): string
+{
+    $url = trim($rawUrl);
+    if ($url === '') {
+        $url = $defaultUrl;
+    }
+    $parts = parse_url($url);
+    $scheme = strtolower((string)($parts['scheme'] ?? ''));
+    if (!is_array($parts) || !in_array($scheme, ['http', 'https'], true) || empty($parts['host'])) {
+        $errors[] = 'آدرس برنامه باید یک URL معتبر با http یا https باشد.';
+        return $defaultUrl;
+    }
+    return rtrim($url, '/');
 }
 
 function normalizeDbPrefix(string $rawPrefix, array &$errors): string
@@ -418,12 +456,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
                 $pdo->exec('SET NAMES utf8mb4');
 
-                $schema = file_get_contents($basePath . '/database/schema.sql');
-                $schema = str_replace('{{prefix}}', $dbPrefix, $schema);
-                $queries = array_filter(array_map('trim', explode(';', $schema)));
-                foreach ($queries as $query) {
-                    $pdo->exec($query);
-                }
+                SchemaMigrator::applyFile($pdo, $basePath . '/database/schema.sql', $dbPrefix);
+                SchemaMigrator::applyPerformanceIndexes($pdo, $dbPrefix);
 
                 $_SESSION['install_db'] = [
                     'host' => $dbHost,
@@ -432,6 +466,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'pass' => $dbPass,
                     'prefix' => $dbPrefix,
                 ];
+                if (!empty($_SESSION['installer_upgrade'])) {
+                    $_SESSION['install_done'] = true;
+                    header('Location: ' . installUrl('step=finish'));
+                    exit;
+                }
                 header('Location: ' . installUrl('step=3'));
                 exit;
             } catch (Exception $e) {
@@ -452,11 +491,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($fullName === '' || $username === '' || $email === '' || $password === '') {
                 $errors[] = 'اطلاعات مدیر ناقص است.';
             }
-            if (!preg_match('/^[a-z0-9_]{3,32}$/', $username)) {
+            if ($fullName !== '' && !Validator::fullName($fullName)) {
+                $errors[] = 'نام کامل مدیر معتبر نیست.';
+            }
+            if (!Validator::username($username)) {
                 $errors[] = 'نام کاربری مدیر معتبر نیست.';
             }
-            if (strlen($password) < 8) {
-                $errors[] = 'رمز عبور باید حداقل ۸ کاراکتر باشد.';
+            if ($email !== '' && !Validator::gmail($email)) {
+                $errors[] = 'ایمیل مدیر باید Gmail معتبر باشد.';
+            }
+            foreach (Validator::password((string)$password) as $passwordError) {
+                $errors[] = $passwordError;
             }
         }
 
@@ -505,7 +550,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $defaultAppUrl = defaultAppUrl();
             $appUrlInput = trim($_POST['app_url'] ?? '');
-            $appUrl = $appUrlInput !== '' ? $appUrlInput : $defaultAppUrl;
+            $appUrl = normalizeAppUrl($appUrlInput, $defaultAppUrl, $errors);
             $jwtSecret = trim($_POST['jwt_secret'] ?? '');
             if ($jwtSecret === '') {
                 $jwtSecret = bin2hex(random_bytes(32));
@@ -608,7 +653,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $requirements = [
-    'PHP >= 7.4' => version_compare(PHP_VERSION, '7.4.0', '>='),
+    'PHP >= 8.2' => version_compare(PHP_VERSION, '8.2.0', '>='),
     'PDO MySQL' => extension_loaded('pdo_mysql'),
     'MBString' => extension_loaded('mbstring'),
     'OpenSSL' => extension_loaded('openssl'),
@@ -619,6 +664,8 @@ $requirements = [
 $writable = [
     $basePath . '/config' => is_writable($basePath . '/config') || !file_exists($basePath . '/config'),
     $basePath . '/storage' => is_writable($basePath . '/storage'),
+    $basePath . '/storage/cache' => is_writable($basePath . '/storage/cache') || !file_exists($basePath . '/storage/cache'),
+    $basePath . '/storage/logs' => is_writable($basePath . '/storage/logs') || !file_exists($basePath . '/storage/logs'),
     $basePath . '/storage/uploads' => is_writable($basePath . '/storage/uploads'),
     $basePath . '/storage/uploads/media' => is_writable($basePath . '/storage/uploads') || !file_exists($basePath . '/storage/uploads/media'),
 ];

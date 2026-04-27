@@ -1,10 +1,18 @@
 <?php
+declare(strict_types=1);
+
 namespace App\Core;
 
 class Validator
 {
     public static function username(string $username): bool
     {
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['username' => $username], [
+                'username' => ['required', 'string', 'min:3', 'max:32', 'regex:/^[a-z0-9_]+$/', 'not_regex:/group$/i'],
+            ]);
+        }
+
         if (strlen($username) < 3 || strlen($username) > 32) {
             return false;
         }
@@ -36,6 +44,12 @@ class Validator
 
     public static function fullName(string $name): bool
     {
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['name' => $name], [
+                'name' => ['required', 'string', 'min:2', 'max:120'],
+            ]);
+        }
+
         $len = mb_strlen($name);
         return $len >= 2 && $len <= 120;
     }
@@ -43,6 +57,12 @@ class Validator
     public static function gmail(string $email): bool
     {
         $email = strtolower(trim($email));
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['email' => $email], [
+                'email' => ['required', 'email:rfc', 'max:190', 'regex:/@(gmail\.com|googlemail\.com)$/i'],
+            ]);
+        }
+
         if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
             return false;
         }
@@ -86,6 +106,12 @@ class Validator
 
     public static function bio(string $bio): bool
     {
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['bio' => $bio], [
+                'bio' => ['nullable', 'string', 'max:255'],
+            ]);
+        }
+
         return mb_strlen($bio) <= 255;
     }
 
@@ -94,11 +120,23 @@ class Validator
         if ($phone === '') {
             return true;
         }
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['phone' => $phone], [
+                'phone' => ['string', 'min:6', 'max:20', 'regex:/^[+0-9\s\-]{6,20}$/'],
+            ]);
+        }
+
         return (bool) preg_match('/^[+0-9\s\-]{6,20}$/', $phone);
     }
 
     public static function messageBody(string $body): bool
     {
+        if (LaravelValidator::available()) {
+            return LaravelValidator::passes(['body' => $body], [
+                'body' => ['required', 'string', 'min:1', 'max:4000'],
+            ]);
+        }
+
         $len = mb_strlen($body);
         return $len > 0 && $len <= 4000;
     }

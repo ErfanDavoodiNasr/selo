@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}media_files` (
   PRIMARY KEY (`id`),
   KEY `idx_user_id` (`user_id`),
   KEY `idx_type` (`type`),
+  KEY `idx_user_created` (`user_id`, `created_at`),
   CONSTRAINT `fk_media_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -97,6 +98,8 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}conversations` (
   KEY `idx_last_message_at` (`last_message_at`),
   KEY `idx_user_one` (`user_one_id`),
   KEY `idx_user_two` (`user_two_id`),
+  KEY `idx_user_one_last` (`user_one_id`, `last_message_at`, `id`),
+  KEY `idx_user_two_last` (`user_two_id`, `last_message_at`, `id`),
   CONSTRAINT `fk_conv_user_one` FOREIGN KEY (`user_one_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_conv_user_two` FOREIGN KEY (`user_two_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -164,6 +167,8 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}messages` (
   KEY `idx_sender` (`sender_id`),
   KEY `idx_recipient` (`recipient_id`),
   KEY `idx_recipient_conv` (`recipient_id`, `conversation_id`, `id`),
+  KEY `idx_recipient_unread` (`recipient_id`, `is_deleted_for_all`, `conversation_id`, `id`),
+  KEY `idx_sender_conv_id` (`sender_id`, `conversation_id`, `id`),
   KEY `idx_reply_to` (`reply_to_message_id`),
   KEY `idx_media_id` (`media_id`),
   KEY `idx_created_at` (`created_at`),
@@ -225,6 +230,7 @@ CREATE TABLE IF NOT EXISTS `{{prefix}}message_deletions` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uniq_message_user` (`message_id`, `user_id`),
   KEY `idx_user` (`user_id`),
+  KEY `idx_user_message` (`user_id`, `message_id`),
   CONSTRAINT `fk_del_message` FOREIGN KEY (`message_id`) REFERENCES `{{prefix}}messages` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_del_user` FOREIGN KEY (`user_id`) REFERENCES `{{prefix}}users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
