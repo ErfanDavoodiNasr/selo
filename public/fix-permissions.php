@@ -41,6 +41,7 @@ $runtimeFileMode = 0664;
 $runtimeDirs = [
     $root . '/config',
     $root . '/storage',
+    $root . '/storage/cache',
     $root . '/storage/logs',
     $root . '/storage/uploads',
     $root . '/storage/uploads/media',
@@ -102,4 +103,3 @@ echo "Permission fix completed.\n";
 echo "Updated: {$ok}\n";
 echo "Failed: {$fail}\n";
 echo "Now delete storage/.permfix.key\n";
-

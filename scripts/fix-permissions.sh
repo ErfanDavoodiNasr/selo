@@ -21,6 +21,7 @@ find "$TARGET_DIR" -type f -exec chmod 644 {} +
 for dir in \
   "$TARGET_DIR/config" \
   "$TARGET_DIR/storage" \
+  "$TARGET_DIR/storage/cache" \
   "$TARGET_DIR/storage/logs" \
   "$TARGET_DIR/storage/uploads" \
   "$TARGET_DIR/storage/uploads/media"; do

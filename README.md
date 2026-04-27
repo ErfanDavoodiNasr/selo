@@ -1,21 +1,22 @@
-# SELO (سلو) — PHP 7.4 Messenger
+# SELO (سلو) — PHP 8.2 Messenger
 
 SELO is a Telegram‑like messenger for shared hosting. It supports private chats, group chats, replies, message deletion, reactions, and media messaging (text/emoji, photos, videos, voice, files). UI is Persian (RTL).
 
 ---
 
 ## Requirements (Short)
-- **PHP 7.4.x**
+- **PHP 8.2+**
 - **MySQL 5.7+** or **MariaDB 10.2+**
 - PHP extensions: `pdo`, `pdo_mysql`, `mbstring`, `json`, `openssl`, `fileinfo`, `gd`
 - Recommended settings: `memory_limit=128M`, `upload_max_filesize=25M`, `post_max_size=25M`
+- Composer and npm are used by maintainers locally, but no Composer, npm, Docker, Vite, or artisan command is required on production hosting.
 
 ---
 
 ## Install on cPanel (Step‑by‑Step)
 
-### 1) Select PHP 7.4
-- cPanel → **MultiPHP Manager** → select your domain → PHP **7.4** → Apply
+### 1) Select PHP 8.2
+- cPanel → **MultiPHP Manager** → select your domain → PHP **8.2** or newer → Apply
 
 ### 2) Enable PHP extensions
 - cPanel → **Select PHP Version** → enable: `pdo`, `pdo_mysql`, `mbstring`, `json`, `openssl`, `fileinfo`, `gd`
@@ -36,6 +37,7 @@ SELO is a Telegram‑like messenger for shared hosting. It supports private chat
 - Writable folders: **775** (or **777** if 775 fails on shared hosting)
   - `config/`
   - `storage/`
+  - `storage/cache/`
   - `storage/uploads/`
   - `storage/uploads/media/`
   - `storage/logs/`
@@ -66,10 +68,11 @@ Installer is locked by default for non-local IPs.
 Installer steps:
 1. Requirements check
 2. Database connection
-3. Admin (optional)
-4. Settings (app URL, JWT, uploads)
-5. Config generation (`config/config.php`)
-6. Finish
+3. Schema import/update and performance indexes
+4. Admin (optional)
+5. Settings (app URL, JWT, uploads)
+6. Config generation (`config/config.php`)
+7. Finish
 
 **After install**
 - Delete or lock `/install`
@@ -85,8 +88,22 @@ Installer steps:
 
 ## Upgrade / Migration
 - Runtime schema auto-create has been removed from request paths.
-- Before upgrading code, apply schema updates from `database/schema.sql` (same DB prefix as your install).
+- Before upgrading code, back up your database and files.
+- Open the browser installer with `?upgrade=1` and enter the existing database credentials and table prefix to create missing tables and add missing performance indexes. Existing tables/data are preserved.
+- New installs import `database/schema.sql`; the installer also checks and adds the known missing indexes on existing installs.
 - If schema is incomplete, APIs now return a clear migration-required error instead of trying runtime DDL.
+
+## Architecture Notes
+- The app remains a ready-to-upload custom PHP application for shared hosting.
+- Composer dependencies are committed in `vendor/` so shared-host users do not run `composer install`.
+- The codebase uses Laravel components where they help without adding deployment friction. Validation now uses `illuminate/validation` when the committed vendor bundle is present, with local fallbacks for resilience.
+- Frontend assets are built locally with npm/esbuild and committed under `public/assets/build`.
+- Required production assets are committed under `public/assets` and `public/assets/build`. User uploads, logs, local config, cache files, `node_modules`, and secrets are not committed.
+
+## Maintainer Build Commands
+- PHP dependencies: `composer install --no-dev --optimize-autoloader`
+- Frontend assets: `npm install --no-bin-links` then `npm run build`
+- Commit `composer.lock`, `vendor/`, `package-lock.json`, and `public/assets/build/` after dependency or asset changes.
 
 ### Offline Compliance Check
 - Run: `php scripts/check-offline-compliance.php`
