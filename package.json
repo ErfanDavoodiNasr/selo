@@ -1,0 +1,14 @@
+{
+  "name": "selo-messenger",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Build tooling for committed SELO browser assets",
+  "scripts": {
+    "build": "npm run build:js && npm run build:css",
+    "build:js": "node node_modules/esbuild/bin/esbuild public/assets/emoji-picker.js --minify --target=es2019 --outfile=public/assets/build/emoji-picker.js && node node_modules/esbuild/bin/esbuild public/assets/app.js --minify --target=es2019 --outfile=public/assets/build/app.js",
+    "build:css": "node node_modules/esbuild/bin/esbuild public/assets/style.css --minify --outfile=public/assets/build/style.css && node node_modules/esbuild/bin/esbuild public/assets/css/app.css --minify --outfile=public/assets/build/app.css"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
