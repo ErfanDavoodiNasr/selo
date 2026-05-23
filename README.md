@@ -1,139 +1,54 @@
-# SELO (سلو) — PHP 8.2 Messenger
+# SELO (سلو)
 
-SELO is a Telegram‑like messenger for shared hosting. It supports private chats, group chats, replies, message deletion, reactions, and media messaging (text/emoji, photos, videos, voice, files). UI is Persian (RTL).
+SELO is a messenger for shared hosting. It runs on PHP 8.2+ with Laravel for routing and a React + Vite frontend.
 
----
+## At a Glance
+- Private chats, group chats, replies, reactions, message deletion, and media messaging
+- Shared-hosting friendly
+- Installable from the latest GitHub Release ZIP
 
-## Requirements (Short)
-- **PHP 8.2+**
-- **MySQL 5.7+** or **MariaDB 10.2+**
+## Requirements
+- PHP 8.2+
+- MySQL 5.7+ or MariaDB 10.2+
 - PHP extensions: `pdo`, `pdo_mysql`, `mbstring`, `json`, `openssl`, `fileinfo`, `gd`
-- Recommended settings: `memory_limit=128M`, `upload_max_filesize=25M`, `post_max_size=25M`
-- Composer and npm are used by maintainers locally, but no Composer, npm, Docker, Vite, or artisan command is required on production hosting.
+- Recommended PHP settings: `memory_limit=128M`, `upload_max_filesize=25M`, `post_max_size=25M`
 
----
+## Quick Install
+1. Upload the latest GitHub Release ZIP to cPanel and extract it.
+2. Make sure your domain points to the `public/` directory if possible.
+3. Open `/install` in your browser.
+4. Enter your database details and finish the installer.
 
-## Install on cPanel (Step‑by‑Step)
+If your host cannot use `public/` as the document root, keep the app files outside web root and expose only `public/`.
 
-### 1) Select PHP 8.2
-- cPanel → **MultiPHP Manager** → select your domain → PHP **8.2** or newer → Apply
+## What the Installer Does
+- Checks server requirements
+- Connects to the database
+- Creates or updates the schema
+- Adds required indexes
+- Writes `config/config.php`
+- Finishes setup without manual steps
 
-### 2) Enable PHP extensions
-- cPanel → **Select PHP Version** → enable: `pdo`, `pdo_mysql`, `mbstring`, `json`, `openssl`, `fileinfo`, `gd`
+## Configuration
+Main config file: `config/config.php`
 
-### 3) Upload project
-- Example path: `/home/USERNAME/public_html/selo`
-- Upload ZIP → Extract
-- You should see: `app/`, `config/`, `database/`, `public/`, `storage/`
+Common values:
+- `app.url`
+- `app.jwt_secret`
+- `uploads.*`
+- `logging.level`
 
-**Document root**
-- Best: point domain to `/public`
-- Simple deploy (no moving files): extract into `public_html` and open `/install` (requires `.htaccess` / mod_rewrite)
-- If `.htaccess` is disabled: copy **contents of `public/`** into `public_html/` and keep the rest outside web root if you can
+## Logs
+- App log: `storage/logs/app.log`
+- Error log: `storage/logs/error.log`
 
-### 4) Set permissions
-- Folders: **755**
-- Files: **644**
-- Writable folders: **775** (or **777** if 775 fails on shared hosting)
-  - `config/`
-  - `storage/`
-  - `storage/cache/`
-  - `storage/uploads/`
-  - `storage/uploads/media/`
-  - `storage/logs/`
+## Release Build
+- Always use the latest GitHub Release for deployment
+- Download the release ZIP from the release assets
+- Upload and extract that ZIP on cPanel
 
-Automatic fix (recommended after each upload/extract):
-- `bash scripts/fix-permissions.sh`
-- Optional owner/group on VPS: `bash scripts/fix-permissions.sh /home/USER/public_html/selo www-data www-data`
-
-If your cPanel has no terminal/SSH:
-1. In File Manager create: `storage/.permfix.key` and put a long random string in it.
-2. Open in browser: `https://yourdomain.com/fix-permissions.php?key=YOUR_STRING`
-3. After success, delete `storage/.permfix.key`.
-4. (Optional, recommended) delete `public/fix-permissions.php` too.
-
-### 5) Create database
-- cPanel → **MySQL Databases**
-- Create DB + user, assign **ALL privileges**
-- Keep: **DB name, user, password, host (usually localhost)**
-
-### 6) Run installer
-- If installed in root: `https://yourdomain.com/install` (or `https://yourdomain.com/install.php` if `/install` is blocked)
-- If in subfolder: `https://yourdomain.com/selo/install` (or `https://yourdomain.com/selo/install.php` if `/install` is blocked)
-
-Installer is locked by default for non-local IPs.
-- Preferred: set env var `SELO_INSTALL_TOKEN` and open installer with `?install_token=...` (or `X-Install-Token` header).
-- Alternative: create file `storage/.install_unlock` before first run; it is removed automatically after successful install.
-
-Installer steps:
-1. Requirements check
-2. Database connection
-3. Schema import/update and performance indexes
-4. Admin (optional)
-5. Settings (app URL, JWT, uploads)
-6. Config generation (`config/config.php`)
-7. Finish
-
-**After install**
-- Delete or lock `/install`
-
----
-
-## Configuration (Only what you usually need)
-- File: `config/config.php`
-- Change URL: `app.url`
-- Change JWT secret: `app.jwt_secret` (changing it logs everyone out)
-- Upload limits: `uploads.*`
-- Filesystem permission policy (runtime): `filesystem.dir_mode`, `filesystem.file_mode`, `filesystem.umask`
-
-## Upgrade / Migration
-- Runtime schema auto-create has been removed from request paths.
-- Before upgrading code, back up your database and files.
-- Open the browser installer with `?upgrade=1` and enter the existing database credentials and table prefix to create missing tables and add missing performance indexes. Existing tables/data are preserved.
-- New installs import `database/schema.sql`; the installer also checks and adds the known missing indexes on existing installs.
-- If schema is incomplete, APIs now return a clear migration-required error instead of trying runtime DDL.
-
-## Architecture Notes
-- The app remains a ready-to-upload custom PHP application for shared hosting.
-- Composer dependencies are committed in `vendor/` so shared-host users do not run `composer install`.
-- The codebase uses Laravel components where they help without adding deployment friction. Validation now uses `illuminate/validation` when the committed vendor bundle is present, with local fallbacks for resilience.
-- Frontend assets are built locally with npm/esbuild and committed under `public/assets/build`.
-- Required production assets are committed under `public/assets` and `public/assets/build`. User uploads, logs, local config, cache files, `node_modules`, and secrets are not committed.
-
-## Maintainer Build Commands
-- PHP dependencies: `composer install --no-dev --optimize-autoloader`
-- Frontend assets: `npm install --no-bin-links` then `npm run build`
-- Commit `composer.lock`, `vendor/`, `package-lock.json`, and `public/assets/build/` after dependency or asset changes.
-
-### Offline Compliance Check
-- Run: `php scripts/check-offline-compliance.php`
-- The script scans `public/`, `app/`, and `config/` for non-local `http(s)/ws(s)/stun/turn` URLs and fails when public-internet dependencies are detected.
-
----
-
-## Logging (App + Error)
-- Config: `logging.level` (DEBUG/INFO/WARNING/ERROR/CRITICAL)
-  - Enable debug logs: set `logging.level` to **DEBUG**
-  - Reduce noise: set it to **ERROR** or **CRITICAL**
-- Log files:
-  - App: `storage/logs/app.log`
-  - Errors: `storage/logs/error.log`
-- Rotation:
-  - `logging.max_size_mb` (default 10MB)
-  - `logging.max_files` (default 5)
-- Permissions (cPanel):
-  - `storage/logs/` → **775** (use **777** only if required by hosting)
-
----
-
-## Troubleshooting (Quick)
-- **500 error / white page** → wrong PHP version or permissions → set `storage/` to `775`
-- **Upload failed** → make `storage/uploads/` writable
-- **Upload size exceeded** → raise PHP limits and `uploads.*` in config
-- **Emoji/reaction not saving** → ensure MySQL tables use **utf8mb4**
-- **JWT unauthorized** → check `app.jwt_secret`
-
----
-
-## Realtime Notes
-- For messenger realtime, use built-in **SSE + polling fallback** (`/api/stream` and `/api/poll`) which is PHP-compatible.
+## Troubleshooting
+- `500 error / white page` usually means the wrong PHP version or a hosting filesystem issue
+- `Upload failed` usually means `storage/uploads/` is not writable
+- `Upload size exceeded` usually means PHP limits or `uploads.*` need to be increased
+- `JWT unauthorized` usually means `app.jwt_secret` changed
