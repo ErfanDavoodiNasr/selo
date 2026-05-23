@@ -1,0 +1,100 @@
+name: Build and Release Package
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing git tag to release'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release_tag
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.release_tag }}" ]; then
+            TAG="${{ inputs.release_tag }}"
+          elif [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG=""
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_mysql, mbstring, openssl, fileinfo, gd
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build React assets
+        run: npm run build
+
+      - name: Run checks
+        run: |
+          php -l public/index.php
+          php -l artisan
+          php artisan route:list --except-vendor
+          php scripts/check-offline-compliance.php
+
+      - name: Prepare cPanel package
+        run: |
+          mkdir -p release/selo
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='node_modules' \
+            --exclude='release' \
+            --exclude='storage/logs/*' \
+            --exclude='storage/cache/*' \
+            --exclude='storage/uploads/*' \
+            --exclude='config/config.php' \
+            ./ release/selo/
+          mkdir -p release/selo/bootstrap/cache release/selo/storage/logs release/selo/storage/cache release/selo/storage/uploads/media
+          touch release/selo/bootstrap/cache/.gitkeep release/selo/storage/cache/.gitkeep
+          (cd release && zip -r selo.zip selo)
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selo
+          path: release/selo.zip
+
+      - name: Create GitHub release
+        if: ${{ steps.release_tag.outputs.tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: SELO ${{ steps.release_tag.outputs.tag }}
+          files: release/selo.zip
+          generate_release_notes: true
