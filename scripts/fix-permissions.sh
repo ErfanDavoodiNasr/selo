@@ -22,6 +22,10 @@ for dir in \
   "$TARGET_DIR/config" \
   "$TARGET_DIR/storage" \
   "$TARGET_DIR/storage/cache" \
+  "$TARGET_DIR/storage/framework" \
+  "$TARGET_DIR/storage/framework/cache" \
+  "$TARGET_DIR/storage/framework/sessions" \
+  "$TARGET_DIR/storage/framework/views" \
   "$TARGET_DIR/storage/logs" \
   "$TARGET_DIR/storage/uploads" \
   "$TARGET_DIR/storage/uploads/media"; do
