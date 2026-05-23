@@ -22,8 +22,6 @@ session_start();
 
 $configFile = $basePath . '/config/config.php';
 $installLogFile = $basePath . '/storage/logs/install.log';
-$installTokenUsedFile = $basePath . '/storage/install_token_used.flag';
-$installUnlockFile = $basePath . '/storage/.install_unlock';
 $scriptName = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
 $scriptDir = rtrim(dirname($scriptName), '/');
 $scriptBase = basename($scriptName);
@@ -69,100 +67,7 @@ function installLog(string $message): void
     @chmod($installLogFile, 0664);
 }
 
-function isValidIp(string $ip): bool
-{
-    return $ip !== '' && filter_var($ip, FILTER_VALIDATE_IP) !== false;
-}
-
-function isAllowedInstallerIp(string $ip): bool
-{
-    $raw = trim((string)getenv('SELO_INSTALL_ALLOWED_IPS'));
-    if ($raw === '') {
-        return $ip === '127.0.0.1' || $ip === '::1';
-    }
-    $allowed = array_filter(array_map('trim', explode(',', $raw)));
-    return in_array($ip, $allowed, true);
-}
-
-function requestInstallerToken(): ?string
-{
-    if (isset($_REQUEST['install_token']) && is_string($_REQUEST['install_token'])) {
-        return trim($_REQUEST['install_token']);
-    }
-    if (isset($_SERVER['HTTP_X_INSTALL_TOKEN']) && is_string($_SERVER['HTTP_X_INSTALL_TOKEN'])) {
-        return trim($_SERVER['HTTP_X_INSTALL_TOKEN']);
-    }
-    return null;
-}
-
-function enforceInstallerAccess(): void
-{
-    global $installTokenUsedFile, $installUnlockFile;
-
-    $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-    if (!isValidIp($ip)) {
-        $ip = '-';
-    }
-
-    if (isAllowedInstallerIp($ip)) {
-        return;
-    }
-
-    $requiredToken = trim((string)getenv('SELO_INSTALL_TOKEN'));
-    if ($requiredToken === '') {
-        if (is_file($installUnlockFile)) {
-            return;
-        }
-        installLog('installer_access_denied ip=' . $ip . ' reason=locked');
-        http_response_code(403);
-        echo 'Installer is locked.';
-        exit;
-    }
-
-    if (is_file($installTokenUsedFile)) {
-        installLog('installer_access_denied ip=' . $ip . ' reason=token_already_used');
-        http_response_code(403);
-        echo 'Installer token already used.';
-        exit;
-    }
-
-    if (!empty($_SESSION['installer_token_valid']) && $_SESSION['installer_token_valid'] === true) {
-        return;
-    }
-
-    $provided = requestInstallerToken();
-    if ($provided === null || !hash_equals($requiredToken, $provided)) {
-        installLog('installer_access_denied ip=' . $ip . ' reason=invalid_token');
-        http_response_code(403);
-        echo 'Installer token required.';
-        exit;
-    }
-
-    $_SESSION['installer_token_valid'] = true;
-    installLog('installer_token_validated ip=' . $ip);
-}
-
-function consumeInstallerToken(string $ip): void
-{
-    global $installTokenUsedFile, $installUnlockFile;
-
-    if (is_file($installTokenUsedFile)) {
-        return;
-    }
-
-    @file_put_contents($installTokenUsedFile, date('c') . ' ' . $ip);
-    if (is_file($installUnlockFile)) {
-        @unlink($installUnlockFile);
-    }
-    installLog('installer_token_consumed ip=' . $ip);
-}
-
-enforceInstallerAccess();
-
-$upgradeRequested = (($_GET['upgrade'] ?? '') === '1') || !empty($_SESSION['installer_upgrade']);
-if ($upgradeRequested) {
-    $_SESSION['installer_upgrade'] = true;
-}
+$upgradeRequested = true;
 
 if (file_exists($configFile)) {
     $config = require $configFile;
@@ -466,11 +371,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'pass' => $dbPass,
                     'prefix' => $dbPrefix,
                 ];
-                if (!empty($_SESSION['installer_upgrade'])) {
-                    $_SESSION['install_done'] = true;
-                    header('Location: ' . installUrl('step=finish'));
-                    exit;
-                }
                 header('Location: ' . installUrl('step=3'));
                 exit;
             } catch (Exception $e) {
@@ -637,11 +537,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $errors[] = 'ذخیره نهایی تنظیمات ناموفق بود. سطح دسترسی فایل/مسیر config را بررسی کنید.';
                     } else {
                         @chmod($configFile, 0664);
-                        $requestIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-                        if (!isValidIp($requestIp)) {
-                            $requestIp = '-';
-                        }
-                        consumeInstallerToken($requestIp);
                         $_SESSION['install_done'] = true;
                         header('Location: ' . installUrl('step=finish'));
                         exit;
