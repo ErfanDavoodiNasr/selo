@@ -1,0 +1,16 @@
+#!/usr/bin/env php
+<?php
+
+use Illuminate\Foundation\Application;
+use Symfony\Component\Console\Input\ArgvInput;
+
+define('LARAVEL_START', microtime(true));
+define('SELO_SKIP_DB_BOOTSTRAP', true);
+
+require __DIR__ . '/app/bootstrap.php';
+
+$app = require_once __DIR__ . '/bootstrap/app.php';
+
+$status = $app->handleCommand(new ArgvInput());
+
+exit($status);

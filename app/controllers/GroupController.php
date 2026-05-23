@@ -22,6 +22,35 @@ class GroupController
     private const INVITE_TOKEN_TTL_SECONDS = 900;
     private static $inviteTokenTableEnsured = false;
 
+    public static function search(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $query = trim((string)Request::param('query', Request::param('q', '')));
+        if (mb_strlen($query) < 2) {
+            Response::json(['ok' => true, 'data' => []]);
+        }
+
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $query) . '%';
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT g.id, g.title, g.description, g.avatar_path, g.public_handle,
+                CASE WHEN gm.user_id IS NULL THEN 0 ELSE 1 END AS is_member
+            FROM ' . $config['db']['prefix'] . 'groups g
+            LEFT JOIN ' . $config['db']['prefix'] . 'group_members gm
+                ON gm.group_id = g.id AND gm.user_id = ? AND gm.status = ?
+            WHERE g.privacy_type = ? AND (g.title LIKE ? ESCAPE \'\\\\\' OR g.public_handle LIKE ? ESCAPE \'\\\\\')
+            ORDER BY is_member DESC, g.title ASC
+            LIMIT 20');
+        $stmt->execute([(int)$user['id'], 'active', 'public', $like, $like]);
+        $groups = $stmt->fetchAll();
+        foreach ($groups as &$group) {
+            $group['id'] = (int)$group['id'];
+            $group['is_member'] = (int)$group['is_member'] === 1;
+            $group['chat_type'] = 'group';
+        }
+
+        Response::json(['ok' => true, 'data' => $groups]);
+    }
+
     public static function create(array $config): void
     {
         $user = Auth::requireUser($config);

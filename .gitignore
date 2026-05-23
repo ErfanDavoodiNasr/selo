@@ -12,19 +12,31 @@
 *.sublime-*
 
 # PHP/Composer
-# Production Composer dependencies are intentionally committed for shared hosting.
+vendor/
 composer.phar
 .phpunit.result.cache
 
-# Node build tooling is local only; commit built assets in public/assets/build.
+# Node build tooling and generated assets are produced by GitHub Actions.
 node_modules/
+public/assets/build/
 
 # App runtime
+bootstrap/cache/*
+!bootstrap/cache/.gitkeep
 config/config.php
 config/*.local.php
 storage/logs/
 storage/cache/*
 !storage/cache/.gitkeep
+storage/framework/cache/*
+!storage/framework/cache/.gitkeep
+!storage/framework/cache/data/
+storage/framework/cache/data/*
+!storage/framework/cache/data/.gitkeep
+storage/framework/sessions/*
+!storage/framework/sessions/.gitkeep
+storage/framework/views/*
+!storage/framework/views/.gitkeep
 storage/uploads/*
 !storage/uploads/.htaccess
 
