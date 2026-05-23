@@ -12,22 +12,22 @@ const shellMarkup = `<div id="app">
                     <button class="tab" data-tab="register">ثبت‌نام</button>
                 </div>
                 <div class="auth-content">
-                    <form id="login-form" class="auth-form">
-                        <label>نام کاربری یا ایمیل</label>
-                        <input type="text" name="identifier" required>
-                        <label>رمز عبور</label>
-                        <input type="password" name="password" required>
+                    <form id="login-form" class="auth-form" method="post" action="/api/login" autocomplete="on">
+                        <label for="login-identifier">نام کاربری یا ایمیل</label>
+                        <input id="login-identifier" type="text" name="identifier" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+                        <label for="login-password">رمز عبور</label>
+                        <input id="login-password" type="password" name="password" autocomplete="current-password" required>
                         <button type="submit">ورود</button>
                     </form>
-                    <form id="register-form" class="auth-form hidden">
-                        <label>نام کامل</label>
-                        <input type="text" name="full_name" required>
-                        <label>نام کاربری</label>
-                        <input type="text" name="username" required>
-                        <label>ایمیل (فقط Gmail)</label>
-                        <input type="email" name="email" required>
-                        <label>رمز عبور</label>
-                        <input type="password" name="password" required>
+                    <form id="register-form" class="auth-form hidden" method="post" action="/api/register" autocomplete="on">
+                        <label for="register-name">نام کامل</label>
+                        <input id="register-name" type="text" name="full_name" autocomplete="name" required>
+                        <label for="register-username">نام کاربری</label>
+                        <input id="register-username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+                        <label for="register-email">ایمیل (فقط Gmail)</label>
+                        <input id="register-email" type="email" name="email" autocomplete="email" autocapitalize="none" spellcheck="false" required>
+                        <label for="register-password">رمز عبور</label>
+                        <input id="register-password" type="password" name="password" autocomplete="new-password" required>
                         <button type="submit">ثبت‌نام</button>
                     </form>
                 </div>
@@ -46,7 +46,7 @@ const shellMarkup = `<div id="app">
                         <div class="brand-mini">SELO</div>
                         <div class="brand-subtitle">سلو</div>
                     </div>
-                    <div class="sidebar-actions">
+                    <div class="sidebar-actions legacy-header-actions" aria-hidden="true">
                         <button id="new-group-btn" class="icon-btn" title="گروه جدید" aria-label="گروه جدید">
                             <span class="material-symbols-rounded">group_add</span>
                         </button>
@@ -69,6 +69,58 @@ const shellMarkup = `<div id="app">
                     <span class="unread-text">پیام جدید</span>
                 </div>
                 <div id="chat-list" class="chat-list" role="listbox" aria-label="لیست گفتگوها" aria-orientation="vertical"></div>
+                <section id="sidebar-menu-view" class="sidebar-view sidebar-menu-view hidden" aria-label="منوی برنامه">
+                    <div class="sidebar-view-header">
+                        <button id="sidebar-menu-back" class="icon-btn" type="button" title="بازگشت" aria-label="بازگشت">
+                            <span class="material-symbols-rounded">arrow_forward</span>
+                        </button>
+                        <div>
+                            <div class="sidebar-view-title">منو</div>
+                            <div class="sidebar-view-subtitle">تنظیمات و ابزارهای حساب</div>
+                        </div>
+                    </div>
+                    <div class="sidebar-menu-card">
+                        <div id="sidebar-menu-avatar" class="menu-avatar" role="button" tabindex="0" aria-label="تنظیمات حساب">👤</div>
+                        <div class="menu-user">
+                            <div id="sidebar-menu-user-name" class="menu-user-name">-</div>
+                            <div id="sidebar-menu-user-username" class="menu-user-username">-</div>
+                        </div>
+                    </div>
+                    <div class="sidebar-view-body menu-items">
+                        <button id="sidebar-account-settings-btn" class="menu-item" type="button">
+                            <span class="material-symbols-rounded">manage_accounts</span>
+                            تنظیمات حساب کاربری
+                        </button>
+                        <button id="sidebar-new-group-btn" class="menu-item" type="button">
+                            <span class="material-symbols-rounded">group_add</span>
+                            ایجاد گروه جدید
+                        </button>
+                        <button id="sidebar-contacts-btn" class="menu-item" type="button">
+                            <span class="material-symbols-rounded">person</span>
+                            مخاطبین
+                        </button>
+                        <button id="sidebar-theme-btn" class="menu-item" type="button">
+                            <span class="material-symbols-rounded">dark_mode</span>
+                            حالت شب / روز
+                        </button>
+                        <button id="sidebar-logout-btn" class="menu-item danger" type="button">
+                            <span class="material-symbols-rounded">logout</span>
+                            خروج
+                        </button>
+                    </div>
+                </section>
+                <section id="sidebar-settings-view" class="sidebar-view sidebar-settings-view hidden" aria-label="تنظیمات حساب">
+                    <div class="sidebar-view-header">
+                        <button id="sidebar-settings-back" class="icon-btn" type="button" title="بازگشت" aria-label="بازگشت">
+                            <span class="material-symbols-rounded">arrow_forward</span>
+                        </button>
+                        <div>
+                            <div class="sidebar-view-title">تنظیمات</div>
+                            <div class="sidebar-view-subtitle">حساب، گروه جدید و ظاهر برنامه</div>
+                        </div>
+                    </div>
+                    <div id="sidebar-settings-body" class="sidebar-view-body"></div>
+                </section>
             </aside>
 
             <section class="chat-panel">
@@ -85,6 +137,17 @@ const shellMarkup = `<div id="app">
                         </div>
                     </div>
                     <div class="chat-header-actions">
+                        <button id="chat-call-btn" class="icon-btn chat-call-action hidden" title="تماس" aria-label="تماس">
+                            <span class="material-symbols-rounded">call</span>
+                        </button>
+                        <button id="chat-search-btn" class="icon-btn" title="جستجو در گفتگو" aria-label="جستجو در گفتگو">
+                            <span class="material-symbols-rounded">search</span>
+                        </button>
+                        <button id="chat-more-btn" class="icon-btn" title="گزینه‌های گفتگو" aria-label="گزینه‌های گفتگو">
+                            <span class="material-symbols-rounded">more_horiz</span>
+                        </button>
+                    </div>
+                    <div class="legacy-header-actions" aria-hidden="true">
                         <button id="group-settings-btn" class="icon-btn hidden" title="تنظیمات گروه" aria-label="تنظیمات گروه">
                             <span class="material-symbols-rounded">tune</span>
                         </button>
@@ -93,6 +156,21 @@ const shellMarkup = `<div id="app">
                         </button>
                     </div>
                 </div>
+                <div id="chat-search-bar" class="chat-search-bar hidden" role="search" aria-label="جستجو در پیام‌های گفتگو">
+                    <span class="material-symbols-rounded">search</span>
+                    <input id="chat-message-search" type="search" placeholder="جستجو در همین گفتگو..." autocomplete="off" />
+                    <div id="chat-search-count" class="chat-search-count">۰ نتیجه</div>
+                    <button id="chat-search-prev" class="icon-btn small" title="نتیجه قبلی" aria-label="نتیجه قبلی">
+                        <span class="material-symbols-rounded">keyboard_arrow_up</span>
+                    </button>
+                    <button id="chat-search-next" class="icon-btn small" title="نتیجه بعدی" aria-label="نتیجه بعدی">
+                        <span class="material-symbols-rounded">keyboard_arrow_down</span>
+                    </button>
+                    <button id="chat-search-close" class="icon-btn small" title="بستن جستجو" aria-label="بستن جستجو">
+                        <span class="material-symbols-rounded">close</span>
+                    </button>
+                </div>
+                <div id="conversation-menu" class="conversation-menu hidden" role="menu" aria-label="گزینه‌های گفتگو"></div>
                 <div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="پیام‌ها"></div>
                 <button id="jump-to-bottom" class="jump-to-bottom hidden" title="رفتن به پایین" aria-label="رفتن به پایین">
                     <span class="material-symbols-rounded">south</span>
@@ -188,7 +266,10 @@ const shellMarkup = `<div id="app">
 
     <aside id="profile-panel" class="profile-panel hidden" aria-label="پروفایل">
         <div class="profile-panel-header">
-            <div class="profile-panel-title">پروفایل</div>
+            <div class="profile-panel-head">
+                <div id="profile-panel-title" class="profile-panel-title">پروفایل</div>
+                <div id="profile-panel-mode" class="profile-panel-mode">کاربر</div>
+            </div>
             <button id="profile-panel-close" class="icon-btn" title="بستن" aria-label="بستن">
                 <span class="material-symbols-rounded">close</span>
             </button>
@@ -198,18 +279,34 @@ const shellMarkup = `<div id="app">
             <div id="profile-panel-name" class="profile-panel-name">-</div>
             <div id="profile-panel-username" class="profile-panel-username">-</div>
             <div id="profile-panel-status" class="profile-panel-status">-</div>
+            <div class="profile-panel-actions">
+                <button id="profile-panel-edit-btn" class="send-btn small" type="button">ویرایش / تنظیمات</button>
+                <button id="profile-panel-secondary-btn" class="icon-btn" type="button" aria-label="عملیات تکمیلی">
+                    <span class="material-symbols-rounded">tune</span>
+                </button>
+            </div>
             <div class="profile-panel-section">
-                <div class="profile-panel-label">درباره</div>
+                <div id="profile-panel-bio-label" class="profile-panel-label">درباره</div>
                 <div id="profile-panel-bio" class="profile-panel-value muted">-</div>
             </div>
             <div class="profile-panel-section">
-                <div class="profile-panel-label">ایمیل</div>
+                <div id="profile-panel-email-label" class="profile-panel-label">ایمیل</div>
                 <div id="profile-panel-email" class="profile-panel-value">-</div>
             </div>
             <div class="profile-panel-section">
-                <div class="profile-panel-label">شماره تماس</div>
+                <div id="profile-panel-phone-label" class="profile-panel-label">شماره تماس</div>
                 <div id="profile-panel-phone" class="profile-panel-value">-</div>
             </div>
+            <div id="profile-panel-group-actions" class="profile-panel-section hidden">
+                <div class="profile-panel-label">تنظیمات گروه</div>
+                <div class="profile-panel-group-buttons">
+                    <button id="profile-panel-group-settings" class="send-btn small" type="button">تنظیمات گروه</button>
+                    <button id="profile-panel-group-invite" class="icon-btn" type="button" aria-label="دعوت عضو">
+                        <span class="material-symbols-rounded">person_add</span>
+                    </button>
+                </div>
+            </div>
+            <div id="profile-panel-embedded" class="profile-panel-embedded"></div>
         </div>
     </aside>
 
@@ -396,6 +493,17 @@ const shellMarkup = `<div id="app">
                             <option value="nobody">نمایش تقریبی (اخیراً / هفته اخیر / ماه اخیر)</option>
                         </select>
                     </div>
+                </div>
+                <div class="settings-section">
+                    <div class="section-title">برنامه</div>
+                    <button id="settings-new-group-btn" class="menu-item" type="button">
+                        <span class="material-symbols-rounded">group_add</span>
+                        گروه جدید
+                    </button>
+                    <button id="settings-theme-toggle" class="menu-item" type="button">
+                        <span class="material-symbols-rounded">dark_mode</span>
+                        تغییر تم
+                    </button>
                 </div>
             </div>
         </div>

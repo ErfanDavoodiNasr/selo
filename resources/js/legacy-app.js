@@ -36,6 +36,11 @@
       total: 0,
       byConversation: {}
     },
+    mutedConversations: {},
+    chatSearch: {
+      matches: [],
+      index: -1
+    },
     readMarkers: {},
     recording: {
       mediaRecorder: null,
@@ -63,7 +68,8 @@
       activeModal: null,
       modalReturnFocus: null,
       lightboxReturnFocus: null
-    }
+    },
+    drawerMode: 'conversation'
   };
 
   const authView = document.getElementById('auth-view');
@@ -103,6 +109,17 @@
   const chatUserUsername = document.getElementById('chat-user-username');
   const chatUserStatus = document.getElementById('chat-user-status');
   const chatUserAvatar = document.getElementById('chat-user-avatar');
+  const chatCallBtn = document.getElementById('chat-call-btn');
+  const chatSearchBtn = document.getElementById('chat-search-btn');
+  const chatNotifyBtn = document.getElementById('chat-notify-btn');
+  const chatMoreBtn = document.getElementById('chat-more-btn');
+  const chatSearchBar = document.getElementById('chat-search-bar');
+  const chatMessageSearch = document.getElementById('chat-message-search');
+  const chatSearchCount = document.getElementById('chat-search-count');
+  const chatSearchPrev = document.getElementById('chat-search-prev');
+  const chatSearchNext = document.getElementById('chat-search-next');
+  const chatSearchClose = document.getElementById('chat-search-close');
+  const conversationMenu = document.getElementById('conversation-menu');
   const replyBar = document.getElementById('reply-bar');
   const replyPreview = document.getElementById('reply-preview');
   const replyCancel = document.getElementById('reply-cancel');
@@ -135,6 +152,7 @@
 
   const groupSettingsModal = document.getElementById('group-settings-modal');
   const groupSettingsClose = document.getElementById('group-settings-close');
+  const groupSettingsBody = groupSettingsModal ? groupSettingsModal.querySelector('.modal-body') : null;
   const groupInfoHandle = document.getElementById('group-info-handle');
   const groupInviteRow = document.getElementById('group-invite-row');
   const groupInviteLink = document.getElementById('group-invite-link');
@@ -154,6 +172,19 @@
   const reactionModalTitle = document.getElementById('reaction-modal-title');
   const reactionModalList = document.getElementById('reaction-modal-list');
   const userSettingsBtn = document.getElementById('user-settings-btn');
+  const sidebarMenuView = document.getElementById('sidebar-menu-view');
+  const sidebarMenuBack = document.getElementById('sidebar-menu-back');
+  const sidebarAccountSettingsBtn = document.getElementById('sidebar-account-settings-btn');
+  const sidebarNewGroupBtn = document.getElementById('sidebar-new-group-btn');
+  const sidebarContactsBtn = document.getElementById('sidebar-contacts-btn');
+  const sidebarThemeBtn = document.getElementById('sidebar-theme-btn');
+  const sidebarLogoutBtn = document.getElementById('sidebar-logout-btn');
+  const sidebarMenuAvatar = document.getElementById('sidebar-menu-avatar');
+  const sidebarMenuUserName = document.getElementById('sidebar-menu-user-name');
+  const sidebarMenuUserUsername = document.getElementById('sidebar-menu-user-username');
+  const sidebarSettingsView = document.getElementById('sidebar-settings-view');
+  const sidebarSettingsBack = document.getElementById('sidebar-settings-back');
+  const sidebarSettingsBody = document.getElementById('sidebar-settings-body');
   const sidebarMenuBtn = document.getElementById('sidebar-menu-btn');
   const sidebarMenu = document.getElementById('sidebar-menu');
   const sidebarMenuOverlay = document.getElementById('sidebar-menu-overlay');
@@ -167,14 +198,24 @@
   const menuNightBtn = document.getElementById('menu-night-btn');
   const menuLogoutBtn = document.getElementById('menu-logout-btn');
   const profilePanel = document.getElementById('profile-panel');
+  const profilePanelTitle = document.getElementById('profile-panel-title');
+  const profilePanelMode = document.getElementById('profile-panel-mode');
   const profilePanelClose = document.getElementById('profile-panel-close');
   const profilePanelAvatar = document.getElementById('profile-panel-avatar');
   const profilePanelName = document.getElementById('profile-panel-name');
   const profilePanelUsername = document.getElementById('profile-panel-username');
   const profilePanelStatus = document.getElementById('profile-panel-status');
+  const profilePanelEditBtn = document.getElementById('profile-panel-edit-btn');
+  const profilePanelSecondaryBtn = document.getElementById('profile-panel-secondary-btn');
+  const profilePanelBioLabel = document.getElementById('profile-panel-bio-label');
+  const profilePanelEmailLabel = document.getElementById('profile-panel-email-label');
+  const profilePanelPhoneLabel = document.getElementById('profile-panel-phone-label');
   const profilePanelBio = document.getElementById('profile-panel-bio');
   const profilePanelEmail = document.getElementById('profile-panel-email');
   const profilePanelPhone = document.getElementById('profile-panel-phone');
+  const profilePanelGroupActions = document.getElementById('profile-panel-group-actions');
+  const profilePanelGroupSettings = document.getElementById('profile-panel-group-settings');
+  const profilePanelGroupInvite = document.getElementById('profile-panel-group-invite');
   const messageContextMenu = document.getElementById('message-context-menu');
   const messageActionSheet = document.getElementById('message-action-sheet');
   const messageActionSheetList = document.getElementById('message-action-sheet-list');
@@ -186,6 +227,10 @@
   const jumpToBottom = document.getElementById('jump-to-bottom');
   const userSettingsModal = document.getElementById('user-settings-modal');
   const userSettingsClose = document.getElementById('user-settings-close');
+  const userSettingsBody = userSettingsModal ? userSettingsModal.querySelector('.modal-body') : null;
+  const profilePanelEmbedded = document.getElementById('profile-panel-embedded');
+  const settingsNewGroupBtn = document.getElementById('settings-new-group-btn');
+  const settingsThemeToggle = document.getElementById('settings-theme-toggle');
   const lastSeenPrivacySelect = document.getElementById('last-seen-privacy-select');
   const profileAvatar = document.getElementById('profile-avatar');
   const profileNameInput = document.getElementById('profile-name');
@@ -668,6 +713,7 @@
       messageActionSheet.classList.remove('show');
       messageActionSheet.classList.add('hidden');
     }
+    document.body.classList.remove('message-actions-open');
   }
 
   function closeDeleteConfirm() {
@@ -807,11 +853,33 @@
     messageContextMenu.style.top = posY + 'px';
   }
 
-  function openMessageActionSheet(messageId, element, msg) {
+  function openMessageActionSheet(messageId, element, msg, options = {}) {
     if (!messageActionSheet || !messageActionSheetList) return;
     closeMessageMenus();
     const actions = buildMessageActions(msg, element);
     messageActionSheetList.innerHTML = '';
+
+    const reactionRail = document.createElement('div');
+    reactionRail.className = 'sheet-reactions';
+    allowedReactions.forEach((emoji) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = emoji;
+      btn.className = 'sheet-reaction';
+      if ((element?.dataset.currentReaction || '') === emoji) {
+        btn.classList.add('active');
+      }
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await toggleReaction(messageId, emoji);
+        closeMessageMenus();
+      });
+      reactionRail.appendChild(btn);
+    });
+    messageActionSheetList.appendChild(reactionRail);
+
+    const actionGrid = document.createElement('div');
+    actionGrid.className = 'sheet-action-grid';
     actions.forEach(action => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -825,10 +893,16 @@
         closeMessageMenus();
         await action.handler();
       });
-      messageActionSheetList.appendChild(btn);
+      actionGrid.appendChild(btn);
     });
+    messageActionSheetList.appendChild(actionGrid);
     messageActionSheet.classList.remove('hidden');
     requestAnimationFrame(() => messageActionSheet.classList.add('show'));
+    if (options.anchor) {
+      const rect = options.anchor.getBoundingClientRect();
+      messageActionSheet.style.setProperty('--sheet-anchor-top', `${Math.max(12, rect.top - 8)}px`);
+    }
+    document.body.classList.add('message-actions-open');
   }
 
   async function toggleReaction(messageId, emoji) {
@@ -911,9 +985,9 @@
   function attachMessageLongPress(messageEl, msg) {
     let timer = null;
     messageEl.addEventListener('touchstart', (e) => {
-      if (e.target.closest('.reaction-bar') || e.target.closest('.reaction-chip')) return;
+      if (e.target.closest('.reaction-bar') || e.target.closest('.reaction-chip') || e.target.closest('.message-more')) return;
       timer = setTimeout(() => {
-        openMessageActionSheet(msg.id, messageEl, msg);
+        openMessageActionSheet(msg.id, messageEl, msg, { anchor: messageEl });
       }, 400);
     }, { passive: true });
     messageEl.addEventListener('touchend', () => {
@@ -966,8 +1040,21 @@
   }
 
   function openSidebarMenu() {
-    if (!sidebarMenu || !sidebarMenuOverlay) return;
     syncSidebarProfile();
+    closeSidebarSettings();
+    closeProfilePanel();
+    closeConversationMenu();
+    if (sidebarMenuView) {
+      sidebarMenuView.classList.remove('hidden');
+      document.body.classList.add('sidebar-menu-open');
+      if (window.innerWidth <= 900) {
+        document.body.classList.remove('show-chats');
+      } else {
+        document.body.classList.add('show-chats');
+      }
+      return;
+    }
+    if (!sidebarMenu || !sidebarMenuOverlay) return;
     sidebarMenu.classList.add('show');
     sidebarMenuOverlay.classList.add('show');
     sidebarMenu.classList.remove('hidden');
@@ -975,6 +1062,8 @@
   }
 
   function closeSidebarMenu() {
+    document.body.classList.remove('sidebar-menu-open');
+    sidebarMenuView?.classList.add('hidden');
     if (!sidebarMenu || !sidebarMenuOverlay) return;
     sidebarMenu.classList.remove('show');
     sidebarMenuOverlay.classList.remove('show');
@@ -986,16 +1075,80 @@
     }, 160);
   }
 
-  function openProfilePanel() {
+  function setDrawerMode(mode) {
+    state.drawerMode = mode;
+    document.body.dataset.drawerMode = mode;
+    if (profilePanelMode) {
+      profilePanelMode.textContent = mode === 'account' ? 'تنظیمات حساب' : mode === 'group' ? 'گروه' : 'اطلاعات گفتگو';
+    }
+    if (profilePanelTitle) {
+      profilePanelTitle.textContent = mode === 'account' ? 'تنظیمات حساب' : mode === 'group' ? 'تنظیمات گروه' : 'پروفایل';
+    }
+    if (profilePanelEditBtn) {
+      profilePanelEditBtn.textContent = mode === 'account' ? 'تنظیمات حساب' : mode === 'group' ? 'تنظیمات گروه' : 'ویرایش';
+      profilePanelEditBtn.classList.add('hidden');
+    }
+    if (profilePanelSecondaryBtn) {
+      profilePanelSecondaryBtn.classList.add('hidden');
+    }
+    if (profilePanelGroupActions) {
+      profilePanelGroupActions.classList.add('hidden');
+    }
+  }
+
+  function renderProfilePanelEmbedded(mode) {
+    if (!profilePanelEmbedded) return;
+    profilePanelEmbedded.innerHTML = '';
+    if (mode === 'group' && groupSettingsBody) {
+      profilePanelEmbedded.appendChild(groupSettingsBody);
+    }
+  }
+
+  function openSidebarSettings() {
+    if (!sidebarSettingsView || !sidebarSettingsBody || !userSettingsBody) return;
+    closeSidebarMenu();
+    closeProfilePanel();
+    populateProfilePanel();
+    populateProfileForm();
+    sidebarSettingsBody.appendChild(userSettingsBody);
+    document.body.classList.add('sidebar-settings-open');
+    if (window.innerWidth <= 900) {
+      document.body.classList.remove('show-chats');
+    } else {
+      document.body.classList.add('show-chats');
+    }
+    sidebarSettingsView.classList.remove('hidden');
+    userSearch?.blur();
+  }
+
+  function closeSidebarSettings() {
+    document.body.classList.remove('sidebar-settings-open');
+    sidebarSettingsView?.classList.add('hidden');
+  }
+
+  function openProfilePanel(mode = 'conversation') {
     if (!profilePanel) return;
     setInfoPanelVisible(false);
-    populateProfilePanel();
+    setDrawerMode(mode);
+    if (mode === 'account') {
+      populateProfilePanel();
+      populateProfileForm();
+    } else {
+      populateConversationProfilePanel();
+    }
+    renderProfilePanelEmbedded(mode);
     profilePanel.classList.remove('hidden');
     document.body.classList.add('show-profile');
   }
 
+  function openCurrentProfile() {
+    if (!state.currentConversation) return;
+    openProfilePanel(state.currentConversation.chat_type === 'group' ? 'group' : 'conversation');
+  }
+
   function closeProfilePanel() {
     document.body.classList.remove('show-profile');
+    document.body.dataset.drawerMode = '';
     if (profilePanel) {
       setTimeout(() => {
         if (!document.body.classList.contains('show-profile')) {
@@ -1022,34 +1175,76 @@
     if (profilePanelUsername) profilePanelUsername.textContent = state.me.username ? '@' + state.me.username : '';
     if (profilePanelStatus) profilePanelStatus.textContent = 'آنلاین';
     if (profilePanelBio) profilePanelBio.textContent = state.me.bio || '—';
+    if (profilePanelBioLabel) profilePanelBioLabel.textContent = 'درباره';
+    if (profilePanelEmailLabel) profilePanelEmailLabel.textContent = 'ایمیل';
+    if (profilePanelPhoneLabel) profilePanelPhoneLabel.textContent = 'شماره تماس';
     if (profilePanelEmail) profilePanelEmail.textContent = state.me.email || '—';
     if (profilePanelPhone) profilePanelPhone.textContent = state.me.phone || '—';
+  }
+
+  function populateConversationProfilePanel() {
+    if (!state.currentConversation || !profilePanel) {
+      populateProfilePanel();
+      return;
+    }
+    const conv = state.currentConversation;
+    const isGroup = conv.chat_type === 'group';
+    const title = isGroup ? (conv.title || 'گروه') : (conv.other_name || conv.other_username || 'گفتگو');
+    const subtitle = isGroup
+      ? (conv.public_handle ? '@' + conv.public_handle : 'گروه خصوصی')
+      : (conv.other_username ? '@' + conv.other_username : '');
+    const avatarUrl = !isGroup && conv.other_photo
+      ? makeUrl('/photo.php?id=' + conv.other_photo + '&thumb=1')
+      : '';
+    setAvatar(profilePanelAvatar, avatarUrl, isGroup ? '👥' : avatarInitial(title));
+    if (profilePanelName) profilePanelName.textContent = title;
+    if (profilePanelUsername) profilePanelUsername.textContent = subtitle;
+    if (profilePanelStatus) {
+      profilePanelStatus.textContent = isGroup
+        ? `${state.currentGroup?.members?.length || conv.members_count || 0} عضو`
+        : (conv.status_text || 'last seen recently');
+    }
+    if (profilePanelBio) {
+      if (profilePanelBioLabel) profilePanelBioLabel.textContent = isGroup ? 'درباره گروه' : 'درباره';
+      profilePanelBio.textContent = isGroup
+        ? (state.currentGroup?.group?.description || '—')
+        : (conv.other_bio || '—');
+    }
+    if (profilePanelEmail) {
+      if (profilePanelEmailLabel) profilePanelEmailLabel.textContent = isGroup ? 'شناسه عمومی' : 'ایمیل';
+      profilePanelEmail.textContent = isGroup
+        ? (conv.public_handle ? '@' + conv.public_handle : '—')
+        : (conv.other_email || '—');
+    }
+    if (profilePanelPhone) {
+      if (profilePanelPhoneLabel) profilePanelPhoneLabel.textContent = isGroup ? 'نقش شما' : 'شماره تماس';
+      profilePanelPhone.textContent = isGroup
+        ? (state.currentGroup?.is_owner ? 'ادمین گروه' : 'عضو گروه')
+        : (conv.other_phone || '—');
+    }
+    if (profilePanelGroupActions) {
+      profilePanelGroupActions.classList.toggle('hidden', !isGroup);
+    }
   }
 
   function syncSidebarProfile() {
     if (!state.me) return;
     const avatarUrl = state.me.active_photo_id ? makeUrl('/photo.php?id=' + state.me.active_photo_id + '&thumb=1') : '';
     const initial = (state.me.full_name || '👤').trim().slice(0, 1) || '👤';
-    if (sidebarProfileAvatar) {
+    [sidebarProfileAvatar, menuAvatar, sidebarMenuAvatar].forEach((avatarEl) => {
+      if (!avatarEl) return;
       if (avatarUrl) {
-        sidebarProfileAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        sidebarProfileAvatar.textContent = '';
+        avatarEl.style.backgroundImage = `url(${avatarUrl})`;
+        avatarEl.textContent = '';
       } else {
-        sidebarProfileAvatar.style.backgroundImage = '';
-        sidebarProfileAvatar.textContent = initial;
+        avatarEl.style.backgroundImage = '';
+        avatarEl.textContent = initial;
       }
-    }
-    if (menuAvatar) {
-      if (avatarUrl) {
-        menuAvatar.style.backgroundImage = `url(${avatarUrl})`;
-        menuAvatar.textContent = '';
-      } else {
-        menuAvatar.style.backgroundImage = '';
-        menuAvatar.textContent = initial;
-      }
-    }
+    });
     if (menuUserName) menuUserName.textContent = state.me.full_name || '';
     if (menuUserUsername) menuUserUsername.textContent = state.me.username ? '@' + state.me.username : '';
+    if (sidebarMenuUserName) sidebarMenuUserName.textContent = state.me.full_name || 'کاربر';
+    if (sidebarMenuUserUsername) sidebarMenuUserUsername.textContent = state.me.username ? '@' + state.me.username : '';
   }
 
   function isMobileLayout() {
@@ -1062,6 +1257,47 @@
 
   const savedTheme = localStorage.getItem('selo_theme') || 'light';
   setTheme(savedTheme);
+  state.mutedConversations = loadMutedConversations();
+
+  function loadMutedConversations() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('selo_muted_conversations_v1') || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveMutedConversations() {
+    try {
+      localStorage.setItem('selo_muted_conversations_v1', JSON.stringify(state.mutedConversations || {}));
+    } catch {
+      // Ignore storage errors; mute state remains in memory for this session.
+    }
+  }
+
+  function conversationMutedKey(conversation = state.currentConversation) {
+    return conversation ? `${conversation.chat_type}:${conversation.id}` : '';
+  }
+
+  function isConversationMuted(conversation = state.currentConversation) {
+    const key = conversationMutedKey(conversation);
+    return !!(key && state.mutedConversations[key]);
+  }
+
+  function toggleConversationMute(conversation = state.currentConversation) {
+    const key = conversationMutedKey(conversation);
+    if (!key) return;
+    if (state.mutedConversations[key]) {
+      delete state.mutedConversations[key];
+      notify('گفتگو با صدا شد.', 'success');
+    } else {
+      state.mutedConversations[key] = true;
+      notify('گفتگو بی‌صدا شد.', 'success');
+    }
+    saveMutedConversations();
+    renderConversations();
+  }
 
   function bindKeyboardActivation(element, callback) {
     if (!element || typeof callback !== 'function') return;
@@ -1080,16 +1316,86 @@
   sidebarMenuBtn?.addEventListener('click', openSidebarMenu);
   sidebarMenuOverlay?.addEventListener('click', closeSidebarMenu);
   sidebarProfileBtn?.addEventListener('click', () => {
-    closeSidebarMenu();
-    openProfilePanel();
+    openSidebarSettings();
   });
   const openProfileFromMenu = () => {
-    closeSidebarMenu();
-    openProfilePanel();
+    openSidebarSettings();
   };
   menuAvatar?.addEventListener('click', openProfileFromMenu);
   bindKeyboardActivation(menuAvatar, openProfileFromMenu);
+  sidebarMenuAvatar?.addEventListener('click', openProfileFromMenu);
+  bindKeyboardActivation(sidebarMenuAvatar, openProfileFromMenu);
+  sidebarMenuBack?.addEventListener('click', closeSidebarMenu);
+  sidebarAccountSettingsBtn?.addEventListener('click', async () => {
+    await refreshMe();
+    syncUserSettingsUI();
+    openSidebarSettings();
+  });
+  sidebarNewGroupBtn?.addEventListener('click', () => {
+    closeSidebarMenu();
+    closeSidebarSettings();
+    groupError.textContent = '';
+    groupForm.reset();
+    groupHandleRow.classList.add('hidden');
+    openModal(groupModal);
+  });
+  sidebarContactsBtn?.addEventListener('click', () => {
+    closeSidebarMenu();
+    closeSidebarSettings();
+    document.body.classList.add('show-chats');
+    userSearch?.focus();
+  });
+  sidebarThemeBtn?.addEventListener('click', () => {
+    const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+  });
+  sidebarLogoutBtn?.addEventListener('click', async () => {
+    try {
+      await apiFetch(API.logout, { method: 'POST' });
+    } catch (err) {
+      // Ignore logout transport failures; local state is still cleared.
+    }
+    state.token = null;
+    location.reload();
+  });
   profilePanelClose?.addEventListener('click', closeProfilePanel);
+  profilePanelEditBtn?.addEventListener('click', () => {
+    if (state.drawerMode === 'account') {
+      profilePanelEmbedded?.scrollIntoView({ behavior: motionBehavior(), block: 'start' });
+      return;
+    }
+    if (state.drawerMode === 'group' && state.currentConversation) {
+      profilePanelEmbedded?.scrollIntoView({ behavior: motionBehavior(), block: 'start' });
+      return;
+    }
+    if (state.currentConversation) {
+      openProfilePanel(state.currentConversation.chat_type === 'group' ? 'group' : 'conversation');
+    }
+  });
+  profilePanelSecondaryBtn?.addEventListener('click', () => {
+    if (state.drawerMode === 'group') {
+      profilePanelEmbedded?.scrollIntoView({ behavior: motionBehavior(), block: 'start' });
+      return;
+    }
+    if (state.drawerMode === 'conversation') {
+      profilePanelEmbedded?.scrollIntoView({ behavior: motionBehavior(), block: 'start' });
+    }
+  });
+  profilePanelGroupSettings?.addEventListener('click', () => {
+    profilePanelEmbedded?.scrollIntoView({ behavior: motionBehavior(), block: 'start' });
+  });
+  profilePanelGroupInvite?.addEventListener('click', () => {
+    if (state.currentConversation?.chat_type !== 'group') return;
+    if (!state.currentGroup) {
+      loadGroupInfo(state.currentConversation.id).finally(() => {
+        populateGroupSettings();
+        openProfilePanel('group');
+        groupInviteUsername?.focus();
+      });
+      return;
+    }
+    groupInviteUsername?.focus();
+  });
 
   menuNightBtn?.addEventListener('click', () => {
     const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
@@ -1097,8 +1403,25 @@
     closeSidebarMenu();
   });
 
+  settingsThemeToggle?.addEventListener('click', () => {
+    const newTheme = document.body.dataset.theme === 'light' ? 'dark' : 'light';
+    setTheme(newTheme);
+  });
+
+  settingsNewGroupBtn?.addEventListener('click', () => {
+    closeProfilePanel();
+    closeSidebarSettings();
+    groupError.textContent = '';
+    groupForm.reset();
+    groupHandleRow.classList.add('hidden');
+    openModal(groupModal);
+  });
+
+  sidebarSettingsBack?.addEventListener('click', closeSidebarSettings);
+
   menuContactsBtn?.addEventListener('click', () => {
     closeSidebarMenu();
+    closeSidebarSettings();
     document.body.classList.add('show-chats');
     userSearch?.focus();
   });
@@ -1115,15 +1438,12 @@
 
   infoToggle?.addEventListener('click', () => {
     if (!state.currentConversation) return;
-    const willShow = infoPanel ? infoPanel.classList.contains('hidden') : false;
-    setInfoPanelVisible(willShow);
-    updateInfoPanel();
+    openProfilePanel(state.currentConversation.chat_type === 'group' ? 'group' : 'conversation');
   });
 
   const openCurrentChatInfo = () => {
     if (!state.currentConversation) return;
-    setInfoPanelVisible(true);
-    updateInfoPanel();
+    openProfilePanel(state.currentConversation.chat_type === 'group' ? 'group' : 'conversation');
   };
   chatUserHeader?.addEventListener('click', openCurrentChatInfo);
   bindKeyboardActivation(chatUserHeader, openCurrentChatInfo);
@@ -1155,6 +1475,12 @@
       if (document.body.classList.contains('show-profile')) {
         closeProfilePanel();
       }
+      if (document.body.classList.contains('sidebar-settings-open')) {
+        closeSidebarSettings();
+      }
+      if (document.body.classList.contains('sidebar-menu-open')) {
+        closeSidebarMenu();
+      }
       closeMessageMenus();
       closeDeleteConfirm();
       closeSidebarMenu();
@@ -1170,8 +1496,37 @@
 
   document.addEventListener('click', (e) => {
     if (!document.body.classList.contains('show-profile') || !profilePanel || !sidebarProfileBtn) return;
-    if (profilePanel.contains(e.target) || sidebarProfileBtn.contains(e.target)) return;
+    const opener = e.target.closest('#sidebar-profile-btn, #chat-user-header, #menu-avatar, #user-settings-btn, #chat-more-btn, #conversation-menu');
+    if (profilePanel.contains(e.target) || sidebarProfileBtn.contains(e.target) || opener) return;
     closeProfilePanel();
+  });
+
+  chatSearchBtn?.addEventListener('click', openChatSearch);
+  chatSearchClose?.addEventListener('click', closeChatSearch);
+  chatMessageSearch?.addEventListener('input', applyChatSearch);
+  chatMessageSearch?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeChatSearch();
+    }
+  });
+  chatSearchPrev?.addEventListener('click', () => focusChatSearchMatch(state.chatSearch.index - 1));
+  chatSearchNext?.addEventListener('click', () => focusChatSearchMatch(state.chatSearch.index + 1));
+  chatMoreBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (conversationMenu && !conversationMenu.classList.contains('hidden')) {
+      closeConversationMenu();
+      return;
+    }
+    openConversationMenu();
+  });
+  chatCallBtn?.addEventListener('click', () => notify('تماس هنوز فعال نیست.'));
+  chatNotifyBtn?.addEventListener('click', () => notify('اعلان گروه در این نسخه فقط نمایش داده می‌شود.'));
+
+  document.addEventListener('click', (e) => {
+    if (!conversationMenu || conversationMenu.classList.contains('hidden')) return;
+    if (conversationMenu.contains(e.target) || chatMoreBtn?.contains(e.target)) return;
+    closeConversationMenu();
   });
 
   document.addEventListener('click', (e) => {
@@ -1187,7 +1542,7 @@
     await refreshMe();
     syncUserSettingsUI();
     populateProfileForm();
-    openModal(userSettingsModal);
+    openSidebarSettings();
   });
 
   profileSaveBtn?.addEventListener('click', (e) => {
@@ -1850,9 +2205,26 @@
         return;
       }
       state.token = res.data.data.token;
+      await storeBrowserCredential(payload);
       await initialize();
     } catch (err) {
       authError.textContent = err.message;
+    }
+  }
+
+  async function storeBrowserCredential(payload) {
+    if (!('credentials' in navigator) || typeof window.PasswordCredential !== 'function') return;
+    const id = String(payload.identifier || payload.username || payload.email || '').trim();
+    const password = String(payload.password || '');
+    if (!id || !password) return;
+    try {
+      await navigator.credentials.store(new PasswordCredential({
+        id,
+        password,
+        name: payload.full_name || id
+      }));
+    } catch {
+      // Some browsers disable the Credential Management API; autocomplete attrs still remain active.
     }
   }
 
@@ -1887,7 +2259,7 @@
       await loadGroupInfo(state.currentConversation.id);
     }
     populateGroupSettings();
-    openModal(groupSettingsModal);
+    openProfilePanel('group');
   });
 
   groupSettingsSave?.addEventListener('click', async () => {
@@ -2398,15 +2770,131 @@
   function updateHeaderStatus() {
     if (!state.currentConversation) {
       setChatStatus('');
+      syncChatHeaderActions();
       return;
     }
     if (state.currentConversation.chat_type === 'group') {
       const count = state.currentGroup?.members?.length || 0;
-      setChatStatus(count ? `${count} عضو` : 'گروه');
+      const online = state.currentGroup?.members?.filter((member) => member.status === 'online' || member.status_text === 'online').length || 0;
+      setChatStatus(count ? `${count} عضو${online ? `، ${online} آنلاین` : ''}` : 'گروه');
+      syncChatHeaderActions();
       return;
     }
     const statusText = state.currentConversation.status_text || 'last seen recently';
     setChatStatus(statusText);
+    syncChatHeaderActions();
+  }
+
+  function syncChatHeaderActions() {
+    const hasConversation = !!state.currentConversation;
+    const isGroup = state.currentConversation?.chat_type === 'group';
+    chatCallBtn?.classList.toggle('hidden', !hasConversation || isGroup);
+    chatNotifyBtn?.classList.add('hidden');
+    chatSearchBtn?.toggleAttribute('disabled', !hasConversation);
+    chatMoreBtn?.toggleAttribute('disabled', !hasConversation);
+  }
+
+  function clearChatSearchHighlights() {
+    messagesEl?.querySelectorAll('.message-search-hit').forEach((message) => {
+      message.classList.remove('message-search-hit');
+    });
+    messagesEl?.querySelectorAll('.message-search-current').forEach((message) => {
+      message.classList.remove('message-search-current');
+    });
+  }
+
+  function updateChatSearchCount() {
+    const total = state.chatSearch.matches.length;
+    const current = state.chatSearch.index >= 0 ? state.chatSearch.index + 1 : 0;
+    if (chatSearchCount) {
+      chatSearchCount.textContent = total ? `${current} از ${total}` : '۰ نتیجه';
+    }
+    chatSearchPrev?.toggleAttribute('disabled', total <= 1);
+    chatSearchNext?.toggleAttribute('disabled', total <= 1);
+  }
+
+  function focusChatSearchMatch(index) {
+    const matches = state.chatSearch.matches;
+    if (!matches.length) {
+      state.chatSearch.index = -1;
+      updateChatSearchCount();
+      return;
+    }
+    state.chatSearch.index = (index + matches.length) % matches.length;
+    messagesEl?.querySelectorAll('.message-search-current').forEach((message) => {
+      message.classList.remove('message-search-current');
+    });
+    const current = matches[state.chatSearch.index];
+    current.classList.add('message-search-current');
+    current.scrollIntoView({ behavior: motionBehavior(), block: 'center' });
+    updateChatSearchCount();
+  }
+
+  function applyChatSearch() {
+    const query = (chatMessageSearch?.value || '').trim().toLowerCase();
+    clearChatSearchHighlights();
+    state.chatSearch.matches = [];
+    state.chatSearch.index = -1;
+    if (!query || !messagesEl) {
+      updateChatSearchCount();
+      return;
+    }
+    const matches = Array.from(messagesEl.querySelectorAll('.message')).filter((message) => {
+      return message.textContent.toLowerCase().includes(query);
+    });
+    matches.forEach((message) => message.classList.add('message-search-hit'));
+    state.chatSearch.matches = matches;
+    focusChatSearchMatch(0);
+  }
+
+  function openChatSearch() {
+    if (!state.currentConversation || !chatSearchBar || !chatMessageSearch) return;
+    closeConversationMenu();
+    chatSearchBar.classList.remove('hidden');
+    requestAnimationFrame(() => chatMessageSearch.focus());
+    applyChatSearch();
+  }
+
+  function closeChatSearch() {
+    if (!chatSearchBar || !chatMessageSearch) return;
+    chatMessageSearch.value = '';
+    chatSearchBar.classList.add('hidden');
+    state.chatSearch.matches = [];
+    state.chatSearch.index = -1;
+    clearChatSearchHighlights();
+    updateChatSearchCount();
+  }
+
+  function closeConversationMenu() {
+    if (!conversationMenu) return;
+    conversationMenu.classList.add('hidden');
+    conversationMenu.innerHTML = '';
+  }
+
+  function buildConversationMenuButton(icon, label, onClick, danger = false) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'conversation-menu-item' + (danger ? ' danger' : '');
+    button.setAttribute('role', 'menuitem');
+    button.innerHTML = `<span class="material-symbols-rounded">${icon}</span><span>${label}</span>`;
+    button.addEventListener('click', () => {
+      closeConversationMenu();
+      onClick();
+    });
+    return button;
+  }
+
+  function openConversationMenu() {
+    if (!conversationMenu || !state.currentConversation || !chatMoreBtn) return;
+    const muted = isConversationMuted(state.currentConversation);
+    conversationMenu.innerHTML = '';
+    conversationMenu.appendChild(buildConversationMenuButton(muted ? 'notifications' : 'notifications_off', muted ? 'با صدا کردن' : 'بی‌صدا کردن', () => toggleConversationMute(state.currentConversation)));
+    const rect = chatMoreBtn.getBoundingClientRect();
+    conversationMenu.classList.remove('hidden');
+    const width = conversationMenu.offsetWidth || 240;
+    const left = Math.max(12, Math.min(window.innerWidth - width - 12, rect.left + rect.width - width));
+    conversationMenu.style.left = `${left}px`;
+    conversationMenu.style.top = `${Math.min(window.innerHeight - 12, rect.bottom + 10)}px`;
   }
 
   function setInfoPanelVisible(visible) {
@@ -2490,7 +2978,9 @@
       chatUserUsername.textContent = '';
       setAvatar(chatUserAvatar, '', '');
       chatUserHeader?.setAttribute('aria-disabled', 'true');
-      groupSettingsBtn.classList.add('hidden');
+      groupSettingsBtn?.classList.add('hidden');
+      closeChatSearch();
+      closeConversationMenu();
       updateHeaderStatus();
       updateInfoPanel();
       renderPinnedBar();
@@ -2505,7 +2995,7 @@
       }
       setAvatar(chatUserAvatar, '', '👥');
       chatUserHeader?.setAttribute('aria-disabled', 'false');
-      groupSettingsBtn.classList.remove('hidden');
+      groupSettingsBtn?.classList.remove('hidden');
       updateHeaderStatus();
       updateInfoPanel();
       renderPinnedBar();
@@ -2520,7 +3010,7 @@
       setAvatar(chatUserAvatar, '', avatarInitial(displayName));
     }
     chatUserHeader?.setAttribute('aria-disabled', 'false');
-    groupSettingsBtn.classList.add('hidden');
+    groupSettingsBtn?.classList.add('hidden');
     updateHeaderStatus();
     updateInfoPanel();
     renderPinnedBar();
@@ -2597,6 +3087,8 @@
       const badges = document.createElement('div');
       badges.className = 'chat-badges';
       const unread = Number(conv.unread_count || conv.unread || 0);
+      const muted = isConversationMuted(conv);
+      item.classList.toggle('is-muted', muted);
       const conversationName = conv.chat_type === 'group'
         ? (conv.title || 'گروه')
         : (conv.other_name || conv.other_username || 'گفتگو');
@@ -2606,7 +3098,7 @@
       item.setAttribute('aria-label', ariaLabel);
       if (unread > 0) {
         const badge = document.createElement('span');
-        badge.className = 'unread-badge';
+        badge.className = 'unread-badge' + (muted ? ' muted' : '');
         badge.textContent = unread > 99 ? '99+' : String(unread);
         badges.appendChild(badge);
       }
@@ -3251,30 +3743,6 @@
         message.classList.add('emoji-only');
       }
 
-      if (!isPendingMessage) {
-        const reactionBar = buildReactionBar(msg.id, msg.current_user_reaction);
-        message.appendChild(reactionBar);
-      }
-
-      if (!isPendingMessage) {
-        const moreBtn = document.createElement('button');
-        moreBtn.className = 'message-more';
-        moreBtn.type = 'button';
-        moreBtn.innerHTML = '<span class="material-symbols-rounded">more_vert</span>';
-        moreBtn.setAttribute('aria-label', 'گزینه‌های پیام');
-        moreBtn.title = 'گزینه‌های پیام';
-        moreBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const rect = moreBtn.getBoundingClientRect();
-          if (isMobileLayout()) {
-            openMessageActionSheet(msg.id, message, msg);
-          } else {
-            openMessageContextMenu(msg.id, message, msg, rect.left, rect.bottom + 6);
-          }
-        });
-        message.appendChild(moreBtn);
-      }
-
       if (isGroupChat()) {
         const senderWrap = document.createElement('div');
         senderWrap.className = 'message-sender';
@@ -3351,26 +3819,17 @@
 
       if (!isPendingMessage) {
         message.addEventListener('click', (e) => {
-          const interactive = e.target.closest('button, a, input, textarea, select, .reaction-bar, .reaction-chip');
-          if (interactive && !interactive.classList.contains('message-more')) {
+          const interactive = e.target.closest('a, input, textarea, select, .reaction-chip, video, audio, .media-download, .voice-player button, .voice-progress');
+          if (interactive) {
             return;
           }
           e.stopPropagation();
-          if (isMobileLayout()) {
-            openMessageActionSheet(msg.id, message, msg);
-            return;
-          }
-          const rect = message.getBoundingClientRect();
-          openMessageContextMenu(msg.id, message, msg, rect.left + 12, rect.bottom + 8);
+          openMessageActionSheet(msg.id, message, msg, { anchor: message });
         });
 
         message.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          if (isMobileLayout()) {
-            openMessageActionSheet(msg.id, message, msg);
-            return;
-          }
-          openMessageContextMenu(msg.id, message, msg, e.clientX, e.clientY);
+          openMessageActionSheet(msg.id, message, msg, { anchor: message });
         });
 
         attachMessageLongPress(message, msg);
