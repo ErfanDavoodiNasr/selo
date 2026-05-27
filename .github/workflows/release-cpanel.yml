@@ -12,10 +12,6 @@ on:
         description: 'Release tag name (optional, auto-generated if empty)'
         required: false
         type: string
-      release_title:
-        description: 'Release title (optional)'
-        required: false
-        type: string
 
 permissions:
   contents: write
@@ -48,11 +44,7 @@ jobs:
             TAG=""
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${{ inputs.release_title }}" ]; then
-            echo "title=${{ inputs.release_title }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "title=SELO $TAG" >> "$GITHUB_OUTPUT"
-          fi
+          echo "title=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -112,5 +104,6 @@ jobs:
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
           name: ${{ steps.release_tag.outputs.title }}
-          files: release/selo.zip
+          files: |
+            release/selo.zip
           generate_release_notes: true
