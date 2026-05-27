@@ -18,8 +18,8 @@
             },
         };
     </script>
-    <script type="module" crossorigin src="{{ $basePath }}/assets/build/app.js"></script>
-    <link rel="stylesheet" crossorigin href="{{ $basePath }}/assets/build/app.css">
+    <script type="module" crossorigin src="{{ $basePath }}/assets/build/messenger.js"></script>
+    <link rel="stylesheet" crossorigin href="{{ $basePath }}/assets/build/messenger.css">
 </head>
 <body data-theme="light">
     <div id="react-root"></div>
