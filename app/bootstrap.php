@@ -11,7 +11,7 @@ if (PHP_VERSION_ID < 80200) {
     exit;
 }
 
-error_reporting(E_ALL);
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
 ini_set('display_errors', '0');
 
 if (function_exists('mb_internal_encoding')) {

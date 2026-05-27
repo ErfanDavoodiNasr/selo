@@ -2,7 +2,9 @@
 <?php
 
 use Illuminate\Foundation\Application;
+use Illuminate\Contracts\Console\Kernel;
 use Symfony\Component\Console\Input\ArgvInput;
+use Symfony\Component\Console\Output\ConsoleOutput;
 
 define('LARAVEL_START', microtime(true));
 define('SELO_SKIP_DB_BOOTSTRAP', true);
@@ -11,6 +13,15 @@ require __DIR__ . '/app/bootstrap.php';
 
 $app = require_once __DIR__ . '/bootstrap/app.php';
 
-$status = $app->handleCommand(new ArgvInput());
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+set_error_handler(static function (int $severity): bool {
+    return in_array($severity, [E_DEPRECATED, E_USER_DEPRECATED], true);
+});
+
+$kernel = $app->make(Kernel::class);
+$input = new ArgvInput();
+$status = $kernel->handle($input, new ConsoleOutput());
+
+$kernel->terminate($input, $status);
 
 exit($status);

@@ -427,7 +427,7 @@ class GroupController
             $params[] = $beforeId;
         }
 
-        $sql = 'SELECT m.id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.reply_to_message_id, m.created_at,
+        $sql = 'SELECT m.id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.reply_to_message_id, m.forwarded_from_message_id, m.forwarded_from_sender_id, m.forwarded_from_sender_name, m.created_at,
                 su.full_name AS sender_name,
                 sup.id AS sender_photo_id,
                 ru.id AS reply_id, ru.type AS reply_type, ru.body AS reply_body, ru.sender_id AS reply_sender_id,
@@ -523,6 +523,9 @@ class GroupController
         $mediaIds = MessageMediaService::normalizeMediaIds($data['media_ids'] ?? [], isset($data['media_id']) ? (int)$data['media_id'] : null);
         self::enforceArrayLimit($config, 'send_media_ids', $mediaIds);
         $replyTo = isset($data['reply_to_message_id']) ? (int)$data['reply_to_message_id'] : null;
+        $forwardedFromMessageId = isset($data['forwarded_from_message_id']) ? (int)$data['forwarded_from_message_id'] : null;
+        $forwardedFromSenderId = null;
+        $forwardedFromSenderName = null;
 
         $allowedTypes = ['text', 'voice', 'file', 'photo', 'video', 'media'];
         if (!in_array($typeHint, $allowedTypes, true)) {
@@ -609,14 +612,24 @@ class GroupController
                 Response::json(['ok' => false, 'error' => 'پیام مرجع یافت نشد.'], 422);
             }
         }
+        if ($forwardedFromMessageId) {
+            $forwardCheck = $pdo->prepare('SELECT m.id, m.sender_id, u.full_name AS sender_name FROM ' . $config['db']['prefix'] . 'messages m JOIN ' . $config['db']['prefix'] . 'users u ON u.id = m.sender_id WHERE m.id = ? AND m.is_deleted_for_all = 0 LIMIT 1');
+            $forwardCheck->execute([$forwardedFromMessageId]);
+            $forwardRow = $forwardCheck->fetch();
+            if (!$forwardRow) {
+                Response::json(['ok' => false, 'error' => 'پیام فوروارد یافت نشد.'], 422);
+            }
+            $forwardedFromSenderId = (int)$forwardRow['sender_id'];
+            $forwardedFromSenderName = (string)$forwardRow['sender_name'];
+        }
 
         $now = date('Y-m-d H:i:s');
         $bodyValue = ($hasMedia || $body !== '') ? $body : null;
         $attachmentsCount = $hasMedia ? count($mediaIds) : 0;
         try {
             $pdo->beginTransaction();
-            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, group_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, created_at) VALUES (NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)');
-            $insert->execute([$groupId, $user['id'], $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $now]);
+            $insert = $pdo->prepare('INSERT INTO ' . $config['db']['prefix'] . 'messages (conversation_id, group_id, sender_id, recipient_id, client_id, type, body, media_id, attachments_count, reply_to_message_id, forwarded_from_message_id, forwarded_from_sender_id, forwarded_from_sender_name, created_at) VALUES (NULL, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $insert->execute([$groupId, $user['id'], $clientId !== '' ? $clientId : null, $messageType, $bodyValue, $primaryMediaId, $attachmentsCount, $replyTo, $forwardedFromMessageId ?: null, $forwardedFromSenderId, $forwardedFromSenderName, $now]);
             $messageId = (int)$pdo->lastInsertId();
 
             if ($hasMedia) {

@@ -54,7 +54,7 @@ class MessageAttachmentService
             $mid = (int)$msg['id'];
             $attachments = $map[$mid] ?? [];
 
-            // Backfill legacy single media into attachments if needed.
+            // Normalize older single-media rows into the attachments shape.
             if (empty($attachments) && !empty($msg['media'])) {
                 $media = $msg['media'];
                 if (self::mediaFileExists($mediaDir, $media['file_name'] ?? '')) {

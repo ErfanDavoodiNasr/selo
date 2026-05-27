@@ -2,14 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Core\Database;
 use App\Core\LogContext;
 use App\Core\Logger;
-use App\Core\Database;
 use Illuminate\Http\Response as LaravelResponse;
 use Symfony\Component\HttpFoundation\Response as SymfonyResponse;
 use Throwable;
 
-class LegacyApiController
+class ApiActionController
 {
     public static function call(callable $handler): SymfonyResponse
     {
@@ -27,7 +27,6 @@ class LegacyApiController
         Database::init($config);
 
         ob_start();
-        $status = 200;
         try {
             $handler();
             $content = ob_get_clean();

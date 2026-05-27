@@ -112,6 +112,7 @@ class ConversationController
         }
 
         $all = array_merge($directs, $groupItems);
+        self::hydrateSettings($config, $all, (int)$user['id']);
         usort($all, function ($a, $b) {
             return strcmp($b['sort_time'], $a['sort_time']);
         });
@@ -123,6 +124,87 @@ class ConversationController
         }
 
         Response::json(['ok' => true, 'data' => $all]);
+    }
+
+    public static function updateSettings(array $config): void
+    {
+        $user = Auth::requireUser($config);
+        $data = Request::json();
+        $chatType = (string)($data['chat_type'] ?? '');
+        $chatId = (int)($data['chat_id'] ?? 0);
+        if (!in_array($chatType, ['direct', 'group'], true) || $chatId <= 0) {
+            Response::json(['ok' => false, 'error' => 'گفتگو نامعتبر است.'], 422);
+        }
+        $pdo = Database::pdo();
+        self::ensureSettingsTable($config);
+        if ($chatType === 'direct') {
+            $check = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'conversations WHERE id = ? AND (user_one_id = ? OR user_two_id = ?) LIMIT 1');
+            $check->execute([$chatId, $user['id'], $user['id']]);
+        } else {
+            $check = $pdo->prepare('SELECT group_id FROM ' . $config['db']['prefix'] . 'group_members WHERE group_id = ? AND user_id = ? AND status = ? LIMIT 1');
+            $check->execute([$chatId, $user['id'], 'active']);
+        }
+        if (!$check->fetch()) {
+            Response::json(['ok' => false, 'error' => 'دسترسی غیرمجاز.'], 403);
+        }
+
+        $muted = !empty($data['muted']) ? 1 : 0;
+        $pinnedMessageId = isset($data['pinned_message_id']) && (int)$data['pinned_message_id'] > 0 ? (int)$data['pinned_message_id'] : null;
+        $pinnedPreview = trim((string)($data['pinned_preview'] ?? ''));
+        if ($pinnedPreview !== '') {
+            $pinnedPreview = mb_substr($pinnedPreview, 0, 255, 'UTF-8');
+        } else {
+            $pinnedPreview = null;
+        }
+        $now = date('Y-m-d H:i:s');
+        $sql = 'INSERT INTO ' . $config['db']['prefix'] . 'user_conversation_settings (user_id, chat_type, chat_id, muted, pinned_message_id, pinned_preview, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE muted = VALUES(muted), pinned_message_id = VALUES(pinned_message_id), pinned_preview = VALUES(pinned_preview), updated_at = VALUES(updated_at)';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([(int)$user['id'], $chatType, $chatId, $muted, $pinnedMessageId, $pinnedPreview, $now]);
+        Response::json(['ok' => true, 'data' => ['muted' => (bool)$muted, 'pinned_message_id' => $pinnedMessageId, 'pinned_preview' => $pinnedPreview]]);
+    }
+
+    private static function hydrateSettings(array $config, array &$items, int $userId): void
+    {
+        if (empty($items)) return;
+        self::ensureSettingsTable($config);
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT chat_type, chat_id, muted, pinned_message_id, pinned_preview FROM ' . $config['db']['prefix'] . 'user_conversation_settings WHERE user_id = ?');
+        $stmt->execute([$userId]);
+        $settings = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $settings[$row['chat_type'] . ':' . $row['chat_id']] = $row;
+        }
+        foreach ($items as &$item) {
+            $key = $item['chat_type'] . ':' . $item['id'];
+            $row = $settings[$key] ?? null;
+            $item['muted'] = $row ? (bool)$row['muted'] : false;
+            $item['pinned_message_id'] = $row && $row['pinned_message_id'] !== null ? (int)$row['pinned_message_id'] : null;
+            $item['pinned_preview'] = $row['pinned_preview'] ?? null;
+        }
+    }
+
+    private static function ensureSettingsTable(array $config): void
+    {
+        static $done = false;
+        if ($done) return;
+        $pdo = Database::pdo();
+        $prefix = $config['db']['prefix'];
+        $pdo->exec('CREATE TABLE IF NOT EXISTS `' . $prefix . 'user_conversation_settings` (
+            `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `user_id` INT UNSIGNED NOT NULL,
+            `chat_type` ENUM(\'direct\',\'group\') NOT NULL,
+            `chat_id` BIGINT UNSIGNED NOT NULL,
+            `muted` TINYINT(1) NOT NULL DEFAULT 0,
+            `pinned_message_id` BIGINT UNSIGNED NULL,
+            `pinned_preview` VARCHAR(255) NULL,
+            `updated_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uniq_user_chat` (`user_id`, `chat_type`, `chat_id`),
+            KEY `idx_user_chat` (`user_id`, `chat_type`, `chat_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+        $done = true;
     }
 
     public static function start(array $config): void

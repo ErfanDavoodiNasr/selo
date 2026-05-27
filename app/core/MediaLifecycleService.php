@@ -22,7 +22,7 @@ class MediaLifecycleService
         }
 
         if (!self::ensureUsageTable($config)) {
-            self::enforceUploadQuotasLegacy($config, $userId, $incomingBytes, $incomingFiles);
+            self::enforceUploadQuotasFromMediaFiles($config, $userId, $incomingBytes, $incomingFiles);
             return;
         }
 
@@ -39,7 +39,7 @@ class MediaLifecycleService
         }
 
         if (!self::ensureUsageTable($config)) {
-            self::enforceUploadQuotasLegacy($config, $userId, $incomingBytes, $incomingFiles);
+            self::enforceUploadQuotasFromMediaFiles($config, $userId, $incomingBytes, $incomingFiles);
             return;
         }
 
@@ -449,7 +449,7 @@ class MediaLifecycleService
         return null;
     }
 
-    private static function enforceUploadQuotasLegacy(array $config, int $userId, int $incomingBytes, int $incomingFiles): void
+    private static function enforceUploadQuotasFromMediaFiles(array $config, int $userId, int $incomingBytes, int $incomingFiles): void
     {
         $limits = self::limits($config);
         $pdo = Database::pdo();

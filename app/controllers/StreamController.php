@@ -172,7 +172,7 @@ class StreamController
     {
         $pdo = Database::pdo();
         $limit = max(20, min(100, (int)($config['realtime']['stream_message_limit'] ?? 60)));
-        $baseSelect = 'SELECT m.id, m.conversation_id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.recipient_id, m.reply_to_message_id, m.created_at,
+        $baseSelect = 'SELECT m.id, m.conversation_id, m.group_id, m.client_id, m.type, m.body, m.media_id, m.attachments_count, m.sender_id, m.recipient_id, m.reply_to_message_id, m.forwarded_from_message_id, m.forwarded_from_sender_id, m.forwarded_from_sender_name, m.created_at,
                 su.full_name AS sender_name,
                 sup.id AS sender_photo_id,
                 ru.id AS reply_id, ru.type AS reply_type, ru.body AS reply_body, ru.sender_id AS reply_sender_id,
