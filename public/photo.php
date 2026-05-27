@@ -34,7 +34,7 @@ if ($photoId <= 0) {
 $pdo = App\Core\Database::pdo();
 $stmt = $pdo->prepare('SELECT upp.file_name, upp.thumbnail_name, upp.mime_type, upp.user_id
     FROM ' . $config['db']['prefix'] . 'user_profile_photos upp
-    INNER JOIN ' . $config['db']['prefix'] . 'users u ON u.id = upp.user_id AND u.active_photo_id = upp.id
+    INNER JOIN ' . $config['db']['prefix'] . 'users u ON u.id = upp.user_id
     WHERE upp.id = ? AND upp.deleted_at IS NULL
     LIMIT 1');
 $stmt->execute([$photoId]);

@@ -70,10 +70,10 @@ jobs:
 
       - name: Run checks
         run: |
-          php -l public/index.php
-          php -l artisan
-          php artisan route:list --except-vendor
-          php scripts/check-offline-compliance.php
+            php -l public/index.php
+            php -l artisan
+            php artisan route:list
+            php scripts/check-offline-compliance.php
 
       - name: Prepare cPanel package
         run: |

@@ -16,6 +16,7 @@ class ConversationController
     public static function list(array $config): void
     {
         $user = Auth::requireUser($config);
+        PresenceService::ping($config, (int)$user['id']);
         $limit = (int)Request::param('limit', 50);
         $limit = max(20, min(200, $limit));
         $perTypeLimit = min(400, $limit * 2);

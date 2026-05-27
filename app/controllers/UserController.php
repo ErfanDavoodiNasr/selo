@@ -35,6 +35,7 @@ class UserController
         $bio = trim($data['bio'] ?? ($user['bio'] ?? ''));
         $phone = trim($data['phone'] ?? ($user['phone'] ?? ''));
         $email = strtolower(trim($data['email'] ?? $user['email']));
+        $password = $data['password'] ?? '';
 
         if (!Validator::fullName($fullName)) {
             Response::json(['ok' => false, 'error' => 'نام کامل معتبر نیست.'], 422);
@@ -54,6 +55,16 @@ class UserController
         if (!Validator::gmail($email)) {
             Response::json(['ok' => false, 'error' => 'ایمیل باید از نوع Gmail باشد.'], 422);
         }
+
+        $passwordHash = null;
+        if ($password !== '') {
+            $passwordErrors = Validator::password($password);
+            if (!empty($passwordErrors)) {
+                Response::json(['ok' => false, 'error' => implode(' ', $passwordErrors)], 422);
+            }
+            $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+        }
+
         $pdo = Database::pdo();
         if ($username !== $user['username']) {
             $checkUsername = $pdo->prepare('SELECT id FROM ' . $config['db']['prefix'] . 'users WHERE username = ? AND id != ? LIMIT 1');
@@ -69,9 +80,16 @@ class UserController
         }
 
         $now = date('Y-m-d H:i:s');
-        $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
+        if ($passwordHash !== null) {
+            $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, password_hash = ?, updated_at = ? WHERE id = ?');
+            $params = [$fullName, $username, $bio, $phone, $email, $passwordHash, $now, $user['id']];
+        } else {
+            $stmt = $pdo->prepare('UPDATE ' . $config['db']['prefix'] . 'users SET full_name = ?, username = ?, bio = ?, phone = ?, email = ?, updated_at = ? WHERE id = ?');
+            $params = [$fullName, $username, $bio, $phone, $email, $now, $user['id']];
+        }
+
         try {
-            $stmt->execute([$fullName, $username, $bio, $phone, $email, $now, $user['id']]);
+            $stmt->execute($params);
         } catch (PDOException $e) {
             if (self::isUniqueViolation($e)) {
                 Response::json(['ok' => false, 'error' => 'نام کاربری/ایمیل تکراری است.'], 409);
@@ -113,6 +131,31 @@ class UserController
         $stmt->execute($values);
 
         Response::json(['ok' => true, 'data' => $response]);
+    }
+
+    public static function getProfile(array $config, int $userId): void
+    {
+        $me = Auth::requireUser($config);
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT id, full_name, username, email, phone, bio, language, active_photo_id, last_seen_privacy, last_seen_at FROM ' . $config['db']['prefix'] . 'users WHERE id = ? LIMIT 1');
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+        if (!$user) {
+            Response::json(['ok' => false, 'error' => 'کاربر یافت نشد.'], 404);
+        }
+
+        $photosStmt = $pdo->prepare('SELECT id, file_name, thumbnail_name, width, height, is_active FROM ' . $config['db']['prefix'] . 'user_profile_photos WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC');
+        $photosStmt->execute([$userId]);
+        $photos = $photosStmt->fetchAll();
+
+        // Calculate active online status
+        $onlineMap = \App\Core\PresenceService::onlineMap($config, [$userId]);
+        $isOnline = isset($onlineMap[$userId]);
+        $status = LastSeenService::statusFor($user['last_seen_at'] ?? null, $user['last_seen_privacy'] ?? null, $config, $isOnline);
+        $user['status_text'] = $status['text'];
+        $user['is_online'] = $status['is_online'];
+
+        Response::json(['ok' => true, 'data' => ['user' => $user, 'photos' => $photos]]);
     }
 
     public static function search(array $config): void

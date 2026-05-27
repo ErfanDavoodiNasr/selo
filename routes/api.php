@@ -23,6 +23,8 @@ Route::get('/me', fn () => $api(fn () => UserController::me($GLOBALS['config']))
 Route::post('/me', fn () => $api(fn () => UserController::update($GLOBALS['config'])));
 Route::patch('/me/settings', fn () => $api(fn () => UserController::updateSettings($GLOBALS['config'])));
 Route::get('/users/search', fn () => $api(fn () => UserController::search($GLOBALS['config'])));
+Route::get('/users/{userId}', fn (int $userId) => $api(fn () => UserController::getProfile($GLOBALS['config'], $userId)))
+    ->whereNumber('userId');
 
 Route::post('/groups', fn () => $api(fn () => GroupController::create($GLOBALS['config'])));
 Route::get('/groups/search', fn () => $api(fn () => GroupController::search($GLOBALS['config'])));

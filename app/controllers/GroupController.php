@@ -168,6 +168,7 @@ class GroupController
         }
 
         $members = [];
+        $onlineCount = 0;
         if ($isMember) {
             $membersStmt = $pdo->prepare('SELECT gm.user_id AS id, gm.role, u.full_name, u.username, up.id AS photo_id
                 FROM ' . $config['db']['prefix'] . 'group_members gm
@@ -177,10 +178,19 @@ class GroupController
                 ORDER BY gm.role DESC, u.full_name ASC');
             $membersStmt->execute([$group['id'], 'active']);
             $members = $membersStmt->fetchAll();
+            $userIds = [];
+            foreach ($members as $m) {
+                $userIds[] = (int)$m['id'];
+            }
+            $onlineMap = \App\Core\PresenceService::onlineMap($config, $userIds);
             foreach ($members as &$member) {
                 $member['id'] = (int)$member['id'];
                 if ($member['photo_id'] !== null) {
                     $member['photo_id'] = (int)$member['photo_id'];
+                }
+                $member['is_online'] = isset($onlineMap[$member['id']]);
+                if ($member['is_online']) {
+                    $onlineCount++;
                 }
             }
         }
@@ -203,6 +213,8 @@ class GroupController
                     'allow_files' => (int)$group['allow_files'],
                     'created_at' => $group['created_at'],
                     'updated_at' => $group['updated_at'],
+                    'members_count' => count($members),
+                    'online_count' => $onlineCount,
                 ],
                 'is_owner' => $isOwner,
                 'is_member' => $isMember,
